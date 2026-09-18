@@ -1331,17 +1331,25 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
       const tile = document.createElement('img');
       tile.alt = ''; tile.setAttribute('role', 'presentation');
       const controller = new AbortController(); tile._tripAbort = controller;
-      let url;
+      let finished = false;
+      const finish = error => {
+        if (finished || tile._tripCancelled) return;
+        finished = true; clearTimeout(tile._tripTimer);
+        if (tile._tripBlob) { URL.revokeObjectURL(tile._tripBlob); tile._tripBlob = null; }
+        if (error) tile.style.visibility = 'hidden';
+        done(error || null, tile);
+      };
+      tile._tripTimer = setTimeout(() => { finish(new Error('地图服务响应超时')); controller.abort(); }, 15000);
       fetch(this.getTileUrl(coords), { mode: 'cors', credentials: 'omit', cache: 'default', referrerPolicy: 'strict-origin-when-cross-origin', signal: controller.signal })
         .then(response => { if (!response.ok) throw new Error('地图服务 HTTP ' + response.status); return response.blob(); })
         .then(blob => {
-          if (controller.signal.aborted) return;
-          url = URL.createObjectURL(blob); tile._tripBlob = url;
-          tile.onload = () => { URL.revokeObjectURL(url); tile._tripBlob = null; done(null, tile); };
-          tile.onerror = () => { URL.revokeObjectURL(url); tile._tripBlob = null; tile.style.visibility = 'hidden'; done(new Error('地图图片无法解码'), tile); };
-          tile.src = url;
+          if (controller.signal.aborted || finished) return;
+          tile._tripBlob = URL.createObjectURL(blob);
+          tile.onload = () => finish(null);
+          tile.onerror = () => finish(new Error('地图图片无法解码'));
+          tile.src = tile._tripBlob;
         })
-        .catch(error => { if (error.name === 'AbortError') return; tile.style.visibility = 'hidden'; done(error, tile); });
+        .catch(error => { if (!tile._tripCancelled) finish(error); });
       return tile;
     }
   });
@@ -1474,7 +1482,9 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
         const key = this._tileKey(event);
         this._tilePending.delete(key); this._tileLoaded.delete(key); this._tileFailed.add(key); this._queueStatus();
       });
-      this.tileLayer.on('tileunload', event => {
+      this.tileLayer.on('tileunload tileabort', event => {
+        if (event.tile) event.tile._tripCancelled = true;
+        clearTimeout(event.tile?._tripTimer);
         event.tile?._tripAbort?.abort();
         if (event.tile?._tripBlob) URL.revokeObjectURL(event.tile._tripBlob);
         const key = this._tileKey(event);
