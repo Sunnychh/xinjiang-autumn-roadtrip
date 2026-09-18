@@ -10,9 +10,10 @@
 
 请通过上面的 HTTPS 网页访问完整在线地图。直接打开下载的 HTML 文件时，只显示内置的行程区域地理简图，并提供网页版入口。
 
-完整地图使用 Leaflet 与 OpenStreetMap 标准瓦片。请求保留真实网页来源及浏览器默认身份，遵循 HTTP 缓存，不提供离线下载或瓦片批量预取。请求被拒绝时，不显示服务端错误图片，保留内置简图、路线与地点。
+完整地图使用 Leaflet 与 EOX Maps 提供的真实道路底图（OpenStreetMap 数据）。底图覆盖全球，支持自由拖动以及街道级放大，行程地点另有中文标注。请求保留真实网页来源及浏览器默认身份，遵循 HTTP 缓存，不提供离线下载或瓦片批量预取。网络故障时明确显示错误提示，保留内置简图、路线与地点。
 
 - 地图数据：© OpenStreetMap contributors，https://www.openstreetmap.org/copyright
+- 底图服务：EOX Maps，https://maps.eox.at/；渲染 © EOX 与 MapServer（https://github.com/mapserver/basemaps）。
 - 地图问题反馈：https://www.openstreetmap.org/fixthemap
 - 页面问题反馈：https://github.com/Sunnychh/xinjiang-autumn-roadtrip/issues
 - 图片：来源网站外链，各图片权利归原作者或商户。

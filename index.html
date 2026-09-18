@@ -694,7 +694,7 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
 <section id="days-view" class="view">
 <div class="day-navigation"><div class="day-rail" id="day-rail" role="group" aria-label="选择旅行日期"></div></div>
 <div class="daily-layout">
-<section class="map-panel" aria-labelledby="map-title"><div class="panel-heading"><div><p class="eyebrow">跟着日期看路线</p><h2 id="map-title">全程地图</h2></div><div class="map-tools"><button id="show-all">全程</button><button id="focus-day">当天</button><button id="map-minus" aria-label="缩小地图">−</button><button id="map-plus" aria-label="放大地图">＋</button></div></div><div class="map-access-note" id="map-access-note" hidden>本地文件显示行程区域简图。<a href="https://sunnychh.github.io/xinjiang-autumn-roadtrip/" target="_blank" rel="noopener">打开网页版，使用完整地图 ↗</a></div><div class="map-canvas"><div id="trip-map" role="region" aria-label="可拖动缩放的新疆伊犁自驾道路地图"></div><p id="map-loading" class="loading-message">正在展开真实路线…</p></div><div class="map-legend"><span><i class="swatch active-route"></i>当天路线</span><span><i class="swatch other-route"></i>其余行程</span><span>点击路线切换日期 · 可拖动缩放</span></div><div class="map-route-summary" id="map-route-summary"></div><div id="map-tile-status" class="map-tile-status" role="status" aria-live="polite">在线底图加载中…</div><div class="map-footnote">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · WGS84 · 道路数据核验 2026.09.18<br>完整在线底图随拖动、缩放加载；地图与实景图需要联网。路线供规划参考，临时管制以当日公告为准。</div></section>
+<section class="map-panel" aria-labelledby="map-title"><div class="panel-heading"><div><p class="eyebrow">跟着日期看路线</p><h2 id="map-title">全程地图</h2></div><div class="map-tools"><button id="show-all">全程</button><button id="focus-day">当天</button><button id="map-minus" aria-label="缩小地图">−</button><button id="map-plus" aria-label="放大地图">＋</button></div></div><div class="map-access-note" id="map-access-note" hidden>本地文件显示行程区域简图。<a href="https://sunnychh.github.io/xinjiang-autumn-roadtrip/" target="_blank" rel="noopener">打开网页版，使用完整地图 ↗</a></div><div class="map-canvas"><div id="trip-map" role="region" aria-label="可拖动缩放的新疆伊犁自驾道路地图"></div><p id="map-loading" class="loading-message">正在展开真实路线…</p></div><div class="map-legend"><span><i class="swatch active-route"></i>当天路线</span><span><i class="swatch other-route"></i>其余行程</span><span>点击路线切换日期 · 可拖动缩放</span></div><div class="map-route-summary" id="map-route-summary"></div><div id="map-tile-status" class="map-tile-status" role="status" aria-live="polite">在线底图加载中…</div><div class="map-footnote">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · WGS84 · 道路数据核验 2026.09.18<br>道路底图由 <a href="https://maps.eox.at/" target="_blank" rel="noopener">EOX Maps</a> 提供，随拖动、缩放加载；行程地点附中文标注。路线供规划参考，临时管制以当日公告为准。</div></section>
 <section class="day-panel" aria-labelledby="day-title"><div class="day-heading"><div><p class="eyebrow" id="day-kicker"></p><h2 id="day-title"></h2><p id="day-subtitle"></p></div><div class="day-step"><button id="previous-day" aria-label="前一天">←</button><button id="next-day" aria-label="后一天">→</button></div></div><div id="day-metrics" class="day-metrics"></div><div id="day-places" class="day-places"></div><div class="detail-tabs" role="tablist" aria-label="当天详情"><button role="tab" id="tab-timeline" data-detail="timeline" aria-controls="day-detail" aria-selected="true" class="active">时间线</button><button role="tab" id="tab-stay" data-detail="stay" aria-controls="day-detail" aria-selected="false">住宿与餐饮</button><button role="tab" id="tab-road" data-detail="road" aria-controls="day-detail" aria-selected="false">景点与路况</button></div><div id="day-detail" role="tabpanel" aria-labelledby="tab-timeline"></div></section>
 </div></section>
 <section id="budget-view" class="view" hidden>
@@ -1320,13 +1320,21 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
   customElements.define('chart-stage', ChartStage);
 })();
 </script>
-<script>/* Leaflet 1.9.4; local trip data plus on-demand OpenStreetMap standard tiles.
+<script>/* Leaflet 1.9.4; local trip data plus on-demand EOX Maps road tiles.
  * No prefetch, bulk tile download, service worker, or permanent tile cache.
  */
 (function () {
   'use strict';
   // Reject failed HTTP responses before displaying image bodies (including 403 error pictures).
   const CheckedTileLayer = L.TileLayer.extend({
+    _abortLoading() {
+      // Fetch-backed images have complete=true before src is assigned. Leaflet's
+      // native image check would therefore leave obsolete zoom requests running.
+      for (const key of Object.keys(this._tiles)) {
+        const tile = this._tiles[key];
+        if (tile.coords.z !== this._tileZoom && !tile.loaded) this._removeTile(key);
+      }
+    },
     createTile(coords, done) {
       const tile = document.createElement('img');
       tile.alt = ''; tile.setAttribute('role', 'presentation');
@@ -1409,9 +1417,9 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
       this.map.createPane('tripPois').style.zIndex = '450';
       this.routeNodes = new Map();
       this.arrowLayer = this.L.layerGroup().addTo(this.map);
-      this.tileLayer = new CheckedTileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        minZoom: 1, maxZoom: 19, maxNativeZoom: 19, updateWhenIdle: true, keepBuffer: 1,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'
+      this.tileLayer = new CheckedTileLayer('https://tiles.maps.eox.at/wmts/1.0.0/osm_3857/default/g/{z}/{y}/{x}.jpg', {
+        minZoom: 1, maxZoom: 19, maxNativeZoom: 18, tileSize: 256, tms: false, updateWhenIdle: true, keepBuffer: 1,
+        attribution: '<a href="https://maps.eox.at/" target="_blank" rel="noopener">EOX Maps</a> · Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · Rendering &copy; <a href="https://eox.at/" target="_blank" rel="noopener">EOX</a> &amp; <a href="https://github.com/mapserver/basemaps" target="_blank" rel="noopener">MapServer</a>'
       });
       this._connectTileStatus();
       this.map.createPane('tripFallback').style.zIndex = '190';
@@ -1429,6 +1437,7 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
           return;
         }
         this._scheduleDraw();
+        this._queueStatus();
       };
       this.map.on('zoomend moveend resize', this._viewHandler);
       this._offlineHandler = () => this._queueStatus();
@@ -1497,14 +1506,24 @@ input[aria-invalid="true"]{border-color:#b95136!important;outline:1px solid #b95
       if (this.destroyed || this._statusFrame) return;
       this._statusFrame = requestAnimationFrame(() => {
         this._statusFrame = null;
-        const online = navigator.onLine, loaded = this._tileLoaded.size, failed = this._tileFailed.size, pending = this._tilePending.size;
+        // Buffered tiles outside the viewport must not keep the visible map in
+        // an error state after the user pans away from a failed request.
+        const zoom = this.tileLayer._tileZoom;
+        const bounds = this.map.getBounds(), size = this.tileLayer.getTileSize();
+        const nw = this.map.project(bounds.getNorthWest(), zoom).unscaleBy(size).floor();
+        const se = this.map.project(bounds.getSouthEast(), zoom).unscaleBy(size).ceil().subtract([1, 1]);
+        const visibleCount = keys => [...keys].filter(key => {
+          const [z, x, y] = key.split('/').map(Number);
+          return z === zoom && x >= nw.x && x <= se.x && y >= nw.y && y <= se.y;
+        }).length;
+        const online = navigator.onLine, loaded = visibleCount(this._tileLoaded), failed = visibleCount(this._tileFailed), pending = visibleCount(this._tilePending);
         const state = this.localFile ? 'local' : !online ? 'offline' : failed ? (loaded ? 'partial' : 'error') : pending ? 'loading' : loaded ? 'ready' : 'loading';
         const messages = {
           local: '本地文件模式：显示已保存的区域简图。请打开网页版使用完整地图。',
           offline: '当前离线；在线底图需要联网，已存路线和地点仍可查看。',
           error: '底图服务拒绝请求或网络不可用；已显示区域简图，路线与地点保留。',
           partial: '部分底图未能加载；缺失处使用区域简图，路线与地点保留。',
-          loading: '正在按当前位置加载在线地图', ready: '在线地图已加载，可继续拖动和缩放。'
+          loading: '正在按当前位置加载道路地图', ready: 'EOX 道路地图已加载，可继续拖动和缩放。'
         };
         this.tileStatus = { state, message: messages[state], loaded, failed, pending, online };
         this.container.dataset.tileStatus = state;
