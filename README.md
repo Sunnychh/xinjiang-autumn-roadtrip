@@ -8,22 +8,22 @@
 
 ## 已订住宿（2026-09-20更新）
 
-| 入住夜 | 已订酒店 / 查价来源 | 日历起价/间夜 | 均摊/人晚 |
-| --- | --- | ---: | ---: |
-| 09-27 | [独山子丽呈明宇酒店（时代广场店）](https://hotels.ctrip.com/hotels/40239495.html?checkIn=2026-09-27&checkOut=2026-09-28&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥182起 | ¥91起 |
-| 09-28 | [古道·Grassland180°草原观景民宿（孟克特景区店）](https://hotels.ctrip.com/hotels/109181876.html?checkIn=2026-09-28&checkOut=2026-09-29&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥190起 | ¥95起 |
-| 09-29 | [丽思铂悦酒店（那拉提旅游风景区客运站店）](https://hotels.ctrip.com/hotels/129806913.html?checkIn=2026-09-29&checkOut=2026-09-30&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥302起 | ¥151起 |
-| 09-30 | [汉庭新源县人民广场酒店](https://hotels.ctrip.com/hotels/135787943.html?checkIn=2026-09-30&checkOut=2026-10-01&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥207起 | ¥103.5起 |
-| 10-01 | [维也纳国际酒店经典版（伊犁新源人民广场旗舰店）](https://hotels.ctrip.com/hotels/135793551.html?checkIn=2026-10-01&checkOut=2026-10-02&crn=1&adult=2&children=0) | ¥203起 | ¥101.5起 |
-| 10-02 | [麗枫酒店（昭苏天马湖店）](https://hotels.ctrip.com/hotels/129260897.html?checkIn=2026-10-02&checkOut=2026-10-03&crn=1&adult=2&children=0) | ¥249起 | ¥124.5起 |
-| 10-03 | [桔子昭苏天马国际广场酒店](https://hotels.ctrip.com/hotels/130512597.html?checkIn=2026-10-03&checkOut=2026-10-04&crn=1&adult=2&children=0) | ¥249起 | ¥124.5起 |
-| 10-04 | [汉庭伊犁霍城县清水河镇酒店](https://hotels.ctrip.com/hotels/135164854.html?checkIn=2026-10-04&checkOut=2026-10-05&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥252起 | ¥126起 |
-| 10-05 | [星程精河连霍高速路口酒店](https://hotels.ctrip.com/hotels/122204701.html?checkIn=2026-10-05&checkOut=2026-10-06&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥207起 | ¥103.5起 |
-| 10-06 | [你好沙湾143团花园镇酒店](https://hotels.ctrip.com/hotels/123662853.html?checkIn=2026-10-06&checkOut=2026-10-07&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥182起 | ¥91起 |
-| 10-07 | [全季乌鲁木齐天山国际机场阳光恒昌酒店](https://hotels.ctrip.com/hotels/130638813.html?checkIn=2026-10-07&checkOut=2026-10-08&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥310起 | ¥155起 |
-| 11晚参考合计 | 非实付 | **¥2,533** | **¥1,266.5** |
+| 入住夜 | 已订酒店 / 查价来源 | 两人住1间 / 晚 |
+| --- | --- | ---: |
+| 09-27 | [独山子丽呈明宇酒店（时代广场店）](https://hotels.ctrip.com/hotels/40239495.html?checkIn=2026-09-27&checkOut=2026-09-28&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥182起 |
+| 09-28 | [古道·Grassland180°草原观景民宿（孟克特景区店）](https://hotels.ctrip.com/hotels/109181876.html?checkIn=2026-09-28&checkOut=2026-09-29&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥190起 |
+| 09-29 | [丽思铂悦酒店（那拉提旅游风景区客运站店）](https://hotels.ctrip.com/hotels/129806913.html?checkIn=2026-09-29&checkOut=2026-09-30&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥302起 |
+| 09-30 | [汉庭新源县人民广场酒店](https://hotels.ctrip.com/hotels/135787943.html?checkIn=2026-09-30&checkOut=2026-10-01&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥207起 |
+| 10-01 | [维也纳国际酒店经典版（伊犁新源人民广场旗舰店）](https://hotels.ctrip.com/hotels/135793551.html?checkIn=2026-10-01&checkOut=2026-10-02&crn=1&adult=2&children=0) | ¥203起 |
+| 10-02 | [麗枫酒店（昭苏天马湖店）](https://hotels.ctrip.com/hotels/129260897.html?checkIn=2026-10-02&checkOut=2026-10-03&crn=1&adult=2&children=0) | ¥249起 |
+| 10-03 | [桔子昭苏天马国际广场酒店](https://hotels.ctrip.com/hotels/130512597.html?checkIn=2026-10-03&checkOut=2026-10-04&crn=1&adult=2&children=0) | ¥249起 |
+| 10-04 | [汉庭伊犁霍城县清水河镇酒店](https://hotels.ctrip.com/hotels/135164854.html?checkIn=2026-10-04&checkOut=2026-10-05&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥252起 |
+| 10-05 | [星程精河连霍高速路口酒店](https://hotels.ctrip.com/hotels/122204701.html?checkIn=2026-10-05&checkOut=2026-10-06&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥207起 |
+| 10-06 | [你好沙湾143团花园镇酒店](https://hotels.ctrip.com/hotels/123662853.html?checkIn=2026-10-06&checkOut=2026-10-07&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥182起 |
+| 10-07 | [全季乌鲁木齐天山国际机场阳光恒昌酒店](https://hotels.ctrip.com/hotels/130638813.html?checkIn=2026-10-07&checkOut=2026-10-08&crn=1&adult=2&children=0&detailFilters=29%7C1%7E29%7E1%7C2) | ¥310起 |
+| 11晚参考合计 | 非实付 | **¥2,533** |
 
-每家1晚，共11晚。2026-09-20按各自2026入住日、1间2成人查询；以上是公开日历起价，具体房型金额需登录，未匹配所订房型，也未核验早餐、退改和会员优惠。不能作为原订单实付或保证成交价。平均参考约¥115/人·晚。截图未显示的房型、早餐等权益不作推定，商户照片不保证对应所订房型。
+每家1晚，共11晚。2026-09-20按各自2026入住日、1间2成人查询；以上是公开日历起价，具体房型金额需登录，未匹配所订房型，也未核验早餐、退改和会员优惠。不能作为原订单实付或保证成交价。两人餐饮按270元/天 × 12天默认预留，共¥3,240（首尾不足整日也按整天预留，可调整）；住宿和餐饮合计参考¥5,773。截图未显示的房型、早餐等权益不作推定，商户照片不保证对应所订房型。
 
 预算默认采用11晚日历参考合计¥2,533；取消勾选“使用本次11晚对应日期参考价”可用住宿均价滑杆估算。9/19的27家汉庭、全季、亚朵、30条日历起价保留为折叠历史参考，部分地点已不适用。
 
