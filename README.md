@@ -43,10 +43,11 @@
 
 ## 地图与来源
 
-使用HTTPS网页版可显示完整在线地图；下载后通过file协议打开只显示内置区域简图。完整地图使用Leaflet、EOX Maps道路底图和OpenStreetMap数据，支持拖动与缩放，按需加载，未批量下载瓦片。网络故障时显示提示并保留路线。
+使用HTTPS网页版可显示完整在线地图；下载后通过file协议打开只显示内置区域简图。完整地图使用Leaflet与MapLibre GL渲染VersaTiles道路矢量底图，采用OpenStreetMap数据，地名优先显示中文。中文与其他字符使用本地字体；底图没有中文名称时保留原地名。支持自由拖动与缩放，按当前视野加载地图数据，未批量下载瓦片。道路坐标保持WGS84，不对行程路线额外施加坐标偏移。网络故障时显示提示并保留路线。日期导航标题自动换行，手机可横向滚动。
 
 - 地图数据：[© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
-- 底图：[EOX Maps](https://maps.eox.at/)，渲染 © EOX 与 MapServer
+- 底图：[VersaTiles](https://versatiles.org/)（[服务说明](https://docs.versatiles.org/guides/use_tiles_versatiles_org)）；土地覆盖数据：ESA WorldCover 2021
+- 地图组件：Leaflet 1.9.4、MapLibre GL JS 5.24.0、MapLibre GL Leaflet 0.1.1；许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 - 路线：公开OSRM道路几何，赛湖保留有向OSM道路环线
 - 酒店公开地址及照片：各卡片注明携程等商户页面；图片权利归原作者或商户
 - [页面反馈](https://github.com/Sunnychh/xinjiang-autumn-roadtrip/issues)
