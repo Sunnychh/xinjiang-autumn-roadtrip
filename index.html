@@ -1928,7 +1928,7 @@ return maplibregl$1;
       if (document.getElementById('trip-leaflet-component-style')) return;
       const style = document.createElement('style');
       style.id = 'trip-leaflet-component-style';
-      style.textContent = '.trip-leaflet-map{background:#edf0e7;font-family:"PingFang SC","Microsoft YaHei",sans-serif}.trip-leaflet-map .trip-route-arrow{background:none;border:0;pointer-events:none}.trip-leaflet-map .trip-route-tooltip{white-space:normal;max-width:min(340px,75vw);line-height:1.5}.trip-leaflet-map .trip-poi-label{padding:2px 5px;border:0;border-radius:4px;box-shadow:none;background:rgba(250,251,247,.88);white-space:nowrap;line-height:1.3}.trip-leaflet-map .trip-poi-label:before{display:none}.trip-leaflet-map .leaflet-control-attribution{font-size:10px;max-width:100%;background:rgba(255,255,255,.88)}.trip-leaflet-map .leaflet-interactive:focus-visible{outline:2px solid #d76c37;outline-offset:3px}';
+      style.textContent = '.trip-leaflet-map{background:#edf0e7;font-family:"PingFang SC","Microsoft YaHei",sans-serif}.trip-leaflet-map .trip-route-arrow{background:none;border:0;pointer-events:none}.trip-leaflet-map .trip-route-tooltip{box-sizing:border-box;width:280px;max-width:calc(100vw - 48px);white-space:normal;overflow-wrap:anywhere;padding:12px 14px;border:1px solid #dce3d9;border-radius:8px;background:rgba(255,254,250,.98);box-shadow:0 3px 14px #173c3d24;line-height:1.6;color:#173c3d;pointer-events:none}.trip-leaflet-map .trip-route-tooltip:before{display:none}.trip-route-tooltip .route-tip-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px;font-weight:650}.trip-route-tooltip .route-tip-heading span{white-space:nowrap}.trip-route-tooltip .route-tip-distance{color:#247f73;font-variant-numeric:tabular-nums}.trip-route-tooltip .route-tip-name{margin:7px 0 5px;font-size:13px;line-height:1.6;font-weight:500}.trip-route-tooltip .route-tip-caption{font-size:10px;color:#6d807c}.trip-route-tooltip .route-tip-note{margin:8px 0 0;padding-top:8px;border-top:1px solid #dce3d9;font-size:11px;line-height:1.6;color:#8e673b}.trip-leaflet-map .trip-poi-label{padding:2px 5px;border:0;border-radius:4px;box-shadow:none;background:rgba(250,251,247,.88);white-space:nowrap;line-height:1.3}.trip-leaflet-map .trip-poi-label:before{display:none}.trip-leaflet-map .leaflet-control-attribution{font-size:10px;max-width:100%;background:rgba(255,255,255,.88)}.trip-leaflet-map .leaflet-interactive:focus-visible{outline:2px solid #d76c37;outline-offset:3px}';
       document.head.appendChild(style);
     }
 
@@ -2005,6 +2005,35 @@ return maplibregl$1;
       return { ...route, day, renderKind, latlngs: route.geometry.coordinates.map(p => this.L.latLng(p[1], p[0])) };
     }
 
+    _routeTooltipContent(route, note) {
+      const card = document.createElement('div');
+      const heading = document.createElement('div');
+      heading.className = 'route-tip-heading';
+      for (const [text, className] of [[route.date, 'route-tip-date'], [`${(route.distance_m / 1000).toFixed(1)} km`, 'route-tip-distance']]) {
+        const span = document.createElement('span');
+        span.className = className; span.textContent = text; heading.appendChild(span);
+      }
+      card.appendChild(heading);
+      for (const [text, className] of [[route.name, 'route-tip-name'], ['道路参考 · 非实时路况', 'route-tip-caption'], [note, 'route-tip-note']]) {
+        if (!text) continue;
+        const line = document.createElement('p');
+        line.className = className; line.textContent = text; card.appendChild(line);
+      }
+      return card;
+    }
+
+    _fitRouteTooltip(tooltip) {
+      const element = tooltip.getElement();
+      if (!element || !tooltip.isOpen()) return;
+      const mapBox = this.container.getBoundingClientRect(), padding = 12;
+      element.style.width = Math.min(280, mapBox.width - padding * 2) + 'px';
+      const box = element.getBoundingClientRect();
+      const left = Math.max(mapBox.left + padding, Math.min(box.left, mapBox.right - box.width - padding));
+      const top = Math.max(mapBox.top + padding, Math.min(box.top, mapBox.bottom - box.height - padding));
+      const position = this.L.DomUtil.getPosition(element);
+      this.L.DomUtil.setPosition(element, position.add([left - box.left, top - box.top]));
+    }
+
     _createRoutes(routes = this.routes) {
       const pieces = routes.flatMap(route => {
         if (!route.conditional_segments?.length) return [route];
@@ -2024,9 +2053,13 @@ return maplibregl$1;
         const path = this.L.polyline(route.latlngs, { ...common, color, weight: 3, opacity: 0.75, interactive: false }).addTo(this.map);
         const hit = this.L.polyline(route.latlngs, { ...common, dashArray: null, color, weight: 16, opacity: 0, interactive: true }).addTo(this.map);
         let tooltip = `${route.date} ${route.name} · ${(route.distance_m / 1000).toFixed(1)} km（非实时路况）`;
-        if (route.renderKind === 'conditional') tooltip += '｜未确认通行：须按订单向店家核实车辆接入；不代表孟克特闭园通行许可。';
-        if (route.renderKind === 'transfer') tooltip += route.day === 12 ? '｜05:00班车已由用户向酒店确认，酒店称约10分钟到机场；此线仅道路参考，不计租车自驾。' : '｜还车后酒店接驳/出租车道路参考，不计租车自驾；上下车点需确认。';
-        hit.bindTooltip(this._plainContent(tooltip, route.renderKind === 'conditional' ? C.amber : C.ink), { sticky: true, className: 'trip-route-tooltip' });
+        let note = '';
+        if (route.renderKind === 'conditional') note = '未确认通行：须按订单向店家核实车辆接入；不代表孟克特闭园通行许可。';
+        if (route.renderKind === 'transfer') note = route.day === 12 ? '05:00班车已向酒店确认，酒店称约10分钟到机场；此线仅道路参考，不计租车自驾。' : '还车后酒店接驳/出租车道路参考，不计租车自驾；上下车点需确认。';
+        if (note) tooltip += '｜' + note;
+        hit.bindTooltip(this._routeTooltipContent(route, note), { sticky: true, opacity: 1, className: 'trip-route-tooltip' });
+        // Leaflet positions the card first; keep it inside the map at its edges.
+        hit.on('tooltipopen mousemove', () => this._fitRouteTooltip(hit.getTooltip()));
         hit.on('click', () => this._activateDay(route.day));
         for (const layer of [casing, path, hit]) {
           const element = layer.getElement();
