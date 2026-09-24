@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DUMMY_PASSWORD_HASH, hashPassword, randomToken, sha256, validPassword, verifyPassword } from './crypto.mjs';
+import { checklistApi } from './checklist.mjs';
 
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const WINDOW_SECONDS = 15 * 60;
@@ -229,6 +230,11 @@ async function changeMember(request, env, id) {
 
 async function api(request, env, pathname) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) mutationGuard(request);
+  if (pathname === '/api/checklist' || pathname.startsWith('/api/checklist/')) {
+    const db = database(env), user = await requireUser(request, env);
+    return checklistApi(request, pathname, { db, user, sessionHash: sha256(sessionToken(request, env)),
+      readJson, json, method, HttpError, nowSeconds, requireCurrentUser: () => requireUser(request, env) });
+  }
   if (pathname === '/api/auth/login') { method(request, 'POST'); return login(request, env); }
   if (pathname === '/api/auth/me') {
     method(request, 'GET'); return json({ user: userView(await requireUser(request, env)) });
