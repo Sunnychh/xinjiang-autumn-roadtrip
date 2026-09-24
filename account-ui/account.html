@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173c3d">
+  <meta name="referrer" content="same-origin">
+  <meta name="robots" content="noindex, nofollow">
+  <title>账号管理 · 秋日路书</title>
+  <link rel="stylesheet" href="/account-ui/auth.css">
+  <script src="/account-ui/auth.js" defer></script>
+</head>
+<body data-page="account">
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="秋日路书首页"><span class="brand-mark" aria-hidden="true">疆</span><span>秋日路书<small>XINJIANG · 2026</small></span></a>
+    <a class="back-link" href="/"><span aria-hidden="true">←</span> 返回攻略</a>
+  </header>
+  <main class="account-layout" data-screen-label="账号管理">
+    <div class="page-heading"><p class="eyebrow">个人设置</p><h1>账号管理</h1><p class="section-copy">管理登录信息和同行者的访问权限。</p></div>
+    <p id="page-status" class="form-status" role="status" aria-live="polite">正在确认登录状态…</p>
+    <button id="retry-account" class="button secondary" type="button" hidden>重新加载</button>
+    <div id="account-content" hidden>
+      <section class="identity-panel" aria-labelledby="identity-title">
+        <div class="identity"><span class="avatar" id="user-avatar" aria-hidden="true"></span><div><p class="eyebrow" id="identity-title">当前账号</p><h2 id="current-username"></h2><p id="current-role" class="role-label"></p></div></div>
+        <button id="logout-button" class="button secondary" type="button" data-busy-label="正在退出…">退出登录</button>
+      </section>
+      <div class="account-columns">
+        <section class="settings-section" aria-labelledby="password-title">
+          <div class="section-heading"><span class="section-number" aria-hidden="true">01</span><div><h2 id="password-title">修改密码</h2><p class="section-copy">修改后，所有设备都需要重新登录。</p></div></div>
+          <form id="password-form">
+            <fieldset>
+              <label for="current-password">当前密码</label>
+              <div class="password-field"><input id="current-password" name="currentPassword" type="password" autocomplete="current-password" maxlength="128" required><button class="password-toggle" type="button" data-password="current-password" aria-label="显示当前密码" aria-pressed="false">显示</button></div>
+              <label for="new-password">新密码</label>
+              <div class="password-field"><input id="new-password" name="newPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" aria-describedby="password-hint" required><button class="password-toggle" type="button" data-password="new-password" aria-label="显示新密码" aria-pressed="false">显示</button></div>
+              <p class="input-hint" id="password-hint">10–128 个字符，建议使用与其他网站不同的密码。</p>
+              <label for="confirm-password">确认新密码</label>
+              <input id="confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required>
+              <p id="password-status" class="form-status" role="status" aria-live="polite"></p>
+              <button class="button primary" type="submit" data-busy-label="正在更新…">保存新密码</button>
+            </fieldset>
+          </form>
+        </section>
+        <section id="admin-section" class="settings-section" aria-labelledby="members-title" hidden>
+          <div class="section-heading"><span class="section-number" aria-hidden="true">02</span><div><h2 id="members-title">成员管理</h2><p class="section-copy">添加账号，邀请同行者查看路书。</p></div></div>
+          <form id="member-form">
+            <fieldset>
+              <label for="member-username">新成员账号</label>
+              <input id="member-username" name="username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" pattern="[A-Za-z0-9_-]{3,32}" minlength="3" maxlength="32" aria-describedby="username-hint" required>
+              <p class="input-hint" id="username-hint">3–32 位，支持字母、数字、下划线和短横线。</p>
+              <label for="member-password">初始密码</label>
+              <div class="password-field"><input id="member-password" name="password" type="password" autocomplete="new-password" minlength="10" maxlength="128" aria-describedby="member-password-hint" required><button class="password-toggle" type="button" data-password="member-password" aria-label="显示成员初始密码" aria-pressed="false">显示</button></div>
+              <p class="input-hint" id="member-password-hint">10–128 个字符。成员登录后可以自行修改。</p>
+              <p id="member-status" class="form-status" role="status" aria-live="polite"></p>
+              <button class="button primary" type="submit" data-busy-label="正在创建…">添加成员</button>
+            </fieldset>
+          </form>
+          <div class="members-heading"><h3>已有账号</h3><button id="refresh-members" class="text-button" type="button">刷新列表</button></div>
+          <p id="members-status" class="form-status" role="status" aria-live="polite"></p>
+          <ul id="members-list" class="members-list" aria-label="账号列表"></ul>
+          <p class="input-hint">停用后，该成员将立即退出登录，并暂时无法访问。</p>
+        </section>
+      </div>
+    </div>
+    <noscript><p class="form-status" data-state="error">请在浏览器中启用 JavaScript 后管理账号。</p></noscript>
+  </main>
+  <footer class="site-footer"><span>秋日路书</span><span>一路向天山。</span></footer>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "xinjiang-autumn-roadtrip",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "build": "node scripts/build-auth-site.mjs",
+    "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 8787 --var ENVIRONMENT:development",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "seed:local": "node scripts/seed-admin.mjs --local",
+    "db:remote": "node scripts/require-deploy-config.mjs && wrangler d1 migrations apply DB --remote",
+    "seed:remote": "node scripts/seed-admin.mjs --remote",
+    "test": "node --test tests/*.test.mjs",
+    "deploy": "node scripts/require-deploy-config.mjs && npm run build && wrangler deploy"
+  },
+  "devDependencies": { "wrangler": "4.137.0" }
+}

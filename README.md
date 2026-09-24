@@ -57,3 +57,7 @@
 ## 发布
 
 静态网站，GitHub Pages从main分支根目录发布。index.html内置脚本、样式及行程数据，在线底图与照片需要联网。
+
+## 后台与账号登录
+
+新增 Cloudflare Worker + D1 账号登录版，包含登录、退出、修改密码及管理员成员管理。部署说明见 [AUTH-DEPLOYMENT.md](AUTH-DEPLOYMENT.md)。现有 GitHub Pages 仍为公开静态版；后端配置和新站部署完成后才能启用线上登录。密码、数据库及会话数据不存入 Git。

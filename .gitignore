@@ -1,0 +1,14 @@
+node_modules/
+.wrangler/
+.worker-assets/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+test-results/
+*.local.json

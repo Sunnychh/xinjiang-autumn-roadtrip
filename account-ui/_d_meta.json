@@ -1,0 +1,27 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "login": {
+      "versions": [
+        {
+          "path": "login.html",
+          "createdAt": "2026-09-24T11:10:00.248Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "account": {
+      "versions": [
+        {
+          "path": "account.html",
+          "createdAt": "2026-09-24T11:10:00.286Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-24T11:10:00.248Z",
+  "updatedAt": "2026-09-24T11:10:00.286Z"
+}

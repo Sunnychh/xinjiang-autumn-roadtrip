@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173c3d">
+  <meta name="referrer" content="same-origin">
+  <meta name="robots" content="noindex, nofollow">
+  <title>登录 · 秋日路书</title>
+  <link rel="stylesheet" href="/account-ui/auth.css">
+  <script src="/account-ui/auth.js" defer></script>
+</head>
+<body data-page="login">
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="秋日路书首页"><span class="brand-mark" aria-hidden="true">疆</span><span>秋日路书<small>XINJIANG · 2026</small></span></a>
+    <span class="header-note">旅途，从这里继续</span>
+  </header>
+  <main class="login-layout" data-screen-label="登录">
+    <section class="welcome" aria-labelledby="welcome-title">
+      <p class="eyebrow">我们的秋日路书</p>
+      <h1 id="welcome-title">山野之间，<br><span>留下属于我们的路。</span></h1>
+      <p class="welcome-copy">登录账号，继续查看和准备这趟旅程。</p>
+      <svg class="landscape" viewBox="0 0 640 260" fill="none" aria-hidden="true" focusable="false">
+        <path d="M-20 202C70 163 112 228 200 166S324 165 390 105 489 118 568 56 651 69 680 35"/>
+        <path d="M-20 218C70 179 112 244 200 182S324 181 390 121 489 134 568 72 651 85 680 51"/>
+        <path d="M-20 234C70 195 112 260 200 198S324 197 390 137 489 150 568 88 651 101 680 67"/>
+        <path d="M-20 250C70 211 112 276 200 214S324 213 390 153 489 166 568 104 651 117 680 83"/>
+        <path d="M-20 266C70 227 112 292 200 230S324 229 390 169 489 182 568 120 651 133 680 99"/>
+        <path d="M-20 282C70 243 112 308 200 246S324 245 390 185 489 198 568 136 651 149 680 115"/>
+        <path class="trail" d="M75 209C188 199 141 135 241 142S382 161 418 98 487 80 550 62"/>
+        <circle cx="75" cy="209" r="5"/><circle cx="550" cy="62" r="5"/>
+      </svg>
+    </section>
+    <section class="login-card" aria-labelledby="login-title">
+      <p class="eyebrow">欢迎回来</p>
+      <h2 id="login-title">登录路书</h2>
+      <p class="section-copy">使用你的账号和密码。</p>
+      <form id="login-form">
+        <fieldset>
+          <label for="login-username">账号</label>
+          <input id="login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required placeholder="输入账号">
+          <label for="login-password">密码</label>
+          <div class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128" required placeholder="输入密码"><button class="password-toggle" type="button" data-password="login-password" aria-label="显示密码" aria-pressed="false">显示</button></div>
+          <p id="login-status" class="form-status" role="status" aria-live="polite"></p>
+          <button class="button primary full-width" type="submit" data-busy-label="正在登录…">登录并继续 <span aria-hidden="true">↗</span></button>
+        </fieldset>
+      </form>
+      <p class="card-footnote">账号由管理员创建。如忘记密码，请联系管理员。</p>
+      <noscript><p class="form-status" data-state="error">请在浏览器中启用 JavaScript 后登录。</p></noscript>
+    </section>
+  </main>
+  <footer class="site-footer"><span>秋日路书</span><span>一路向天山。</span></footer>
+</body>
+</html>
