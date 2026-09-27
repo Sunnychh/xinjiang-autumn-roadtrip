@@ -63,3 +63,5 @@
 新增 Cloudflare Worker + D1 账号登录版，包含登录、退出、修改密码及管理员成员管理。部署说明见 [AUTH-DEPLOYMENT.md](AUTH-DEPLOYMENT.md)。现有 GitHub Pages 仍为公开静态版；后端配置和新站部署完成后才能启用线上登录。密码、数据库及会话数据不存入 Git。
 
 出发准备已整理为按日期排列的 16 组、86 项事项，可筛选待完成与已完成。登录版按账号保存每次勾选及更新时间，支持刷新恢复和多页面冲突处理；GitHub Pages 静态版可阅读清单，保存进度需使用已连接后端的登录版。
+
+登录版新增 `/upload` 独立照片页，一次上传一张，附言可选。原图和 JSON 说明原子写入私有仓库 `Sunnychh/xinjiang-trip-memories` 的 `records/inbox/` 下，后续可读取分析实际执行和旅行回忆。本地用 `npm run dev:photos` 启动；手机远程使用需完成后端线上部署，原 GitHub Pages 静态页不能直接代替上传后端。详细配置见 [AUTH-DEPLOYMENT.md](AUTH-DEPLOYMENT.md)。

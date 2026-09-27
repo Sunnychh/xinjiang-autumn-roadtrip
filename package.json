@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node scripts/build-auth-site.mjs",
     "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 8787 --var ENVIRONMENT:development",
+    "dev:photos": "npm run build && node scripts/dev-with-github.mjs",
     "db:local": "wrangler d1 migrations apply DB --local",
     "seed:local": "node scripts/seed-admin.mjs --local",
     "db:remote": "node scripts/require-deploy-config.mjs && wrangler d1 migrations apply DB --remote",

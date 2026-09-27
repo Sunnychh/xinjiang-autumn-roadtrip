@@ -8,6 +8,7 @@
 - 不开放公开注册；新成员可阅读攻略、修改自己的密码和保存自己的准备清单。
 - 出发准备包含 16 个日期分组、86 项事项，来自“制定新疆自驾准备清单”的时间顺序版本；按账号保存完成状态、版本和更新时间。刷新或同一账号重新登录会读取数据库记录。
 - 页面只在服务端确认后改变勾选；断网或保存结果不确定时暂停该项并重新同步。多页面同时修改同一项时返回冲突和最新状态，不覆盖另一页刚保存的记录。
+- `/upload` 提供单张照片上传和可选附言，登录后使用；保留原始文件，图片与独立 JSON 说明通过一次 Git 提交写入私有仓库。相同上传编号重试不会产生重复记录。
 - 密码存储为带随机盐的 scrypt 哈希；会话用随机令牌，数据库只存令牌摘要。
 - 会话最长七天，Cookie 使用 HttpOnly / Secure / SameSite=Strict；改密码会撤销该账号的全部会话，停用成员立即撤销其会话。
 - 所有写操作检查 Origin、JSON 格式和同源请求标识；账号/IP 限流、参数校验、预编译 SQL。
@@ -30,6 +31,12 @@ npm run dev
 
 打开 `http://127.0.0.1:8787/login`。本地数据库保存在已被 Git 忽略的 `.wrangler/` 目录；只有 development 环境的 HTTP 回环地址允许非 Secure 开发 Cookie。
 
+### 本机连接 GitHub 照片库
+
+已登录 GitHub CLI 后，停止旧的本地开发进程，执行 `npm run dev:photos`。该命令从本机 `gh` 取得现有登录凭据，只传入回环开发进程的环境变量，不写入源码、磁盘密钥文件或浏览器。Wrangler 的 `secrets.required` 只允许 `GITHUB_TOKEN` 进入运行时。然后打开 `http://127.0.0.1:8787/upload`，使用攻略账号登录。
+
+此地址只在运行服务的电脑上使用；手机或异地访问需要后述线上部署。不要把本机 CLI 的广权限凭据复制到公开页面或用于线上部署。未配置照片凭据时账号和清单仍可使用，照片页显示尚未连接。
+
 ## Cloudflare 部署
 
 源码和发布记录继续放在现有 Git 仓库。Cloudflare 托管登录版网页、Worker 和 D1，浏览器同源访问，避免跨站 Cookie 问题。
@@ -38,9 +45,10 @@ npm run dev
 2. 执行 `npx wrangler d1 create xinjiang-roadtrip-auth`，把返回的 `database_id` 写到 `wrangler.jsonc` 中，替换全零占位 ID。
 3. 确定攻略访问范围：`GUIDE_ACCESS=private` 或 `public`；线上保持 `ENVIRONMENT=production`。
 4. 执行 `npm run db:remote`，然后执行 `npm run seed:remote -- --username Sunrry`，隐藏输入初始密码。
-5. 执行 `npm test`、`npm run deploy`。没有配置真实数据库 ID 时，部署脚本会主动停止。
-6. 在返回的 HTTPS 地址验证：未登录无法读取私密页面；登录后可以看路书、进入账户；退出后再次读取被拒绝。
-7. 新站验证通过后，再将原 GitHub Pages 入口替换为新站跳转，或者关闭旧 Pages。未确定新地址前不要撤掉可用的旧站。
+5. 为 `Sunnychh/xinjiang-trip-memories` 单独配置 GitHub fine-grained token，仅选择该私有仓库、Contents 读写权限。执行 `npx wrangler secret put GITHUB_TOKEN`，在终端隐藏输入中设置；不要把凭据写进 `wrangler.jsonc`、代码或聊天。该权限用于保存照片与读取保存回执。
+6. 执行 `npm test`、`npm run deploy`。没有配置真实数据库 ID 时，部署脚本会主动停止。
+7. 在返回的 HTTPS 地址验证：未登录无法读取私密页面；登录后可以看路书、进入账户和 `/upload`；退出后再次读取被拒绝。验证照片上传、附言可空，以及重试不重复保存。
+8. 新站验证通过后，再将原 GitHub Pages 入口替换为新站跳转，或者关闭旧 Pages。未确定新地址前不要撤掉可用的旧站。
 
 密码哈希是有意设置的较重计算。Cloudflare Workers 免费版每次请求 CPU 上限为 10ms，本实现不能承诺在免费额度内稳定登录；应使用足够 CPU 额度的方案，或根据已有服务器调整部署。代码不会自动购买或升级套餐。[Cloudflare CPU 限制](https://developers.cloudflare.com/workers/platform/limits/)
 
@@ -56,6 +64,14 @@ npm run dev
 
 准备事项正文保存在 `data/preparation-checklist.json`，每个事项的稳定 ID 用于关联进度；修订文字时保留原 ID，新增或实质改变任务时分配新 ID。构建会将当前目录内容嵌入登录版页面。实际勾选保存在 `checklist_items` 表，主键为 `(user_id, item_id)`，不上传 Git。API 为 `GET /api/checklist` 和 `PATCH /api/checklist/:id`；更新提交 `{completed, version}`，冲突返回 HTTP 409 和服务端当前状态。未登录或无后端的静态版只展示清单，不能保存；不使用旧浏览器本地勾选推断真实完成情况。
 
-Cloudflare 中每日清理到期会话和限流记录，不清理准备清单。D1 备份与恢复使用平台功能；不要把真实数据库导出提交 Git。当前版本支持账号与准备清单，尚未接入相册、照片上传或攻略在线编辑。
+Cloudflare 中每日清理到期会话和限流记录，不清理准备清单。D1 备份与恢复使用平台功能；不要把真实数据库导出提交 Git。
+
+### 照片与说明的存储
+
+固定私有仓库为 `Sunnychh/xinjiang-trip-memories`，每张照片存入 `records/inbox/<账号ID>/<上传UUID>/photo.<扩展名>`，同目录 `record.json` 保存原文件名、可选说明、字节数、SHA-256、上传时间及上传账号。拍摄时间和地点初始为空，不把上传时间当作拍摄时间；以后读取原图 EXIF、说明及图像内容再分析。上传不会自动分析或公开照片。
+
+照片限 20 MiB，支持 JPEG、PNG、WebP、HEIC / HEIF，后端检查文件结构和大小，拒绝 SVG、任意文件与额外表单字段。每账号每 15 分钟最多发起 60 次上传请求。客户端上传编号用于重试查证；先创建图片与元数据，再以非强制方式推进分支，避免并发上传互相覆盖。仓库变为公开后拒绝上传和读取。
+
+照片页源码在 `account-ui/upload.*`，处理器在 `backend/memories.mjs`，GitHub 存储适配器在 `backend/github-storage.mjs`。没有图片列表、删除照片或自动整理功能；后续按用户请求读取固定目录整理复盘。
 
 技术依据：[Worker 优先处理静态资源](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/) · [D1 数据库命令](https://developers.cloudflare.com/d1/wrangler-commands/) · [Workers 原生密码学支持](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/)

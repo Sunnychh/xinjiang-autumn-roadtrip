@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173c3d">
+  <meta name="referrer" content="same-origin">
+  <meta name="robots" content="noindex, nofollow">
+  <title>上传旅途照片 · 秋日路书</title>
+  <link rel="stylesheet" href="/account-ui/auth.css">
+  <link rel="stylesheet" href="/account-ui/upload.css">
+  <script src="/account-ui/upload.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="秋日路书首页"><span class="brand-mark" aria-hidden="true">疆</span><span>秋日路书<small>XINJIANG · 2026</small></span></a>
+    <a class="back-link" href="/"><span aria-hidden="true">←</span> 返回攻略</a>
+  </header>
+  <main class="upload-layout" data-screen-label="上传旅途照片">
+    <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">一次一张，想说的话可以一起记下。</p></div>
+    <div class="upload-service"><p id="service-status" class="form-status" role="status" aria-live="polite">正在连接照片存储…</p><button id="service-retry" class="text-button" type="button" hidden>重新连接</button><a id="upload-login" href="/login?next=%2Fupload" hidden>重新登录</a></div>
+    <section id="upload-receipt" class="upload-receipt" aria-labelledby="receipt-title" hidden>
+      <p class="eyebrow">这一刻，已留存</p><h2 id="receipt-title" tabindex="-1">照片已保存</h2>
+      <p id="receipt-file" class="receipt-file"></p><p id="receipt-time" class="input-hint"></p><p id="receipt-caption" class="receipt-caption" hidden></p>
+      <p class="section-copy">原图和附言已存入私密照片库，可用于之后整理旅行回忆。</p>
+      <button id="upload-next" class="button primary" type="button">再上传一张 <span aria-hidden="true">＋</span></button>
+    </section>
+    <form id="upload-form" novalidate>
+      <fieldset id="upload-fields" disabled>
+        <section class="photo-section" aria-labelledby="photo-title">
+          <div class="upload-section-heading"><span class="section-number" aria-hidden="true">01</span><h2 id="photo-title">选一张照片</h2></div>
+          <div id="photo-empty" class="photo-empty"><span class="photo-plus" aria-hidden="true">＋</span><p>此刻的风景，或路上的小事</p><small>可从相册选择，也可直接拍照</small></div>
+          <figure id="photo-preview" class="photo-preview" hidden><img id="preview-image" alt="待上传照片预览"><div id="preview-fallback" hidden><strong>照片已选好</strong><p>此浏览器暂时无法预览该格式，仍可上传原图。</p></div></figure>
+          <div class="photo-actions"><button id="choose-photo" class="button secondary" type="button">从相册选择</button><button id="take-photo" class="button secondary" type="button">拍一张</button></div>
+          <input id="photo-library" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" tabindex="-1" aria-label="从相册选择一张照片">
+          <input id="photo-camera" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" capture="environment" tabindex="-1" aria-label="拍摄一张照片">
+          <div id="photo-info" class="photo-info" hidden><span id="photo-name"></span><span id="photo-size"></span><button id="remove-photo" class="text-button" type="button">移除</button></div>
+          <p id="photo-error" class="form-status" data-state="error" role="alert"></p>
+          <p class="input-hint">JPG、PNG、WebP、HEIC / HEIF，单张不超过 20 MB。</p>
+        </section>
+        <section class="caption-section" aria-labelledby="caption-title">
+          <div class="upload-section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="caption-title">写一句附言 <span>选填</span></h2></div>
+          <label class="visually-hidden" for="photo-caption">照片附言，选填</label><textarea id="photo-caption" name="caption" rows="4" maxlength="4000" placeholder="比如：今天独库的第一场雪，风很大，但舍不得走。" aria-describedby="caption-counter"></textarea>
+          <p id="caption-counter" class="caption-counter">0 / 4,000</p>
+        </section>
+        <div id="upload-progress-wrap" class="upload-progress-wrap" hidden><div><span id="upload-progress-label">正在上传…</span><span id="upload-progress-value"></span></div><progress id="upload-progress" max="100" aria-label="照片上传进度"></progress></div>
+        <p id="upload-status" class="form-status" role="status" aria-live="polite"></p>
+        <button id="upload-submit" class="button primary upload-submit" type="submit" disabled>保存这张照片 <span aria-hidden="true">↗</span></button>
+        <p class="upload-footnote">保留原图与照片自带的拍摄信息；是否含时间、位置取决于原照片。只会在确认保存后显示成功。</p>
+      </fieldset>
+    </form>
+    <noscript><p class="form-status" data-state="error">请启用 JavaScript 后上传照片。</p></noscript>
+  </main>
+  <footer class="site-footer"><span>秋日路书 · 旅途留存</span><span>一路向天山。</span></footer>
+</body>
+</html>

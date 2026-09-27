@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DUMMY_PASSWORD_HASH, hashPassword, randomToken, sha256, validPassword, verifyPassword } from './crypto.mjs';
 import { checklistApi } from './checklist.mjs';
+import { memoriesApi } from './memories.mjs';
 
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const WINDOW_SECONDS = 15 * 60;
@@ -82,13 +83,13 @@ async function requireUser(request, env, admin = false) {
   return user;
 }
 
-function mutationGuard(request) {
+function mutationGuard(request, contentType = 'application/json') {
   if (request.headers.get('Origin') !== new URL(request.url).origin
     || request.headers.get('X-Requested-With') !== 'itinerary') {
     throw new HttpError(403, '请求来源不合法，请刷新页面后重试。');
   }
-  if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
-    throw new HttpError(415, '请使用 JSON 格式提交。');
+  if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== contentType) {
+    throw new HttpError(415, contentType === 'application/json' ? '请使用 JSON 格式提交。' : '请通过照片表单上传。');
   }
 }
 
@@ -229,7 +230,17 @@ async function changeMember(request, env, id) {
 }
 
 async function api(request, env, pathname) {
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) mutationGuard(request);
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    mutationGuard(request, pathname === '/api/memories/photo' && request.method === 'POST' ? 'multipart/form-data' : 'application/json');
+  }
+  if (pathname.startsWith('/api/memories/')) {
+    const user = await requireUser(request, env);
+    if (pathname === '/api/memories/photo' && request.method === 'POST') {
+      await consumeLimit(database(env), `photos:account:${user.id}`, 60, nowSeconds());
+    }
+    return memoriesApi(request, pathname, { env, db: database(env), user, sessionHash: sha256(sessionToken(request, env)),
+      readJson, json, method, HttpError, nowSeconds, requireCurrentUser: () => requireUser(request, env) });
+  }
   if (pathname === '/api/checklist' || pathname.startsWith('/api/checklist/')) {
     const db = database(env), user = await requireUser(request, env);
     return checklistApi(request, pathname, { db, user, sessionHash: sha256(sessionToken(request, env)),
@@ -267,7 +278,7 @@ async function dispatch(request, env) {
   let decodedPath;
   try { decodedPath = decodeURIComponent(pathname); }
   catch { throw new HttpError(400, '页面地址格式不正确。'); }
-  const accountPage = ['/account', '/account/'].includes(decodedPath) || decodedPath.startsWith('/account-ui/');
+  const accountPage = ['/account', '/account/', '/upload', '/upload/', '/upload.html'].includes(decodedPath) || decodedPath.startsWith('/account-ui/');
   if (!isLogin && !publicAsset && (accountPage || env.GUIDE_ACCESS !== 'public')) {
     if (!await authenticated(request, env)) {
       return new Response(null, { status: 302, headers: { Location: `/login?next=${encodeURIComponent(pathname + url.search)}` } });
@@ -277,6 +288,7 @@ async function dispatch(request, env) {
   if (pathname === '/') url.pathname = '/index.html';
   if (isLogin) url.pathname = '/account-ui/login.html';
   if (pathname === '/account' || pathname === '/account/') url.pathname = '/account-ui/account.html';
+  if (['/upload', '/upload/', '/upload.html'].includes(pathname)) url.pathname = '/account-ui/upload.html';
   return env.ASSETS.fetch(new Request(url, request));
 }
 

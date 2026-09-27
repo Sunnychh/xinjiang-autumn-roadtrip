@@ -22,7 +22,7 @@ for (const name of ['detailed-itinerary.md', 'D3-LICENSE.txt', 'LEAFLET-LICENSE.
   await cp(path.join(root, name), path.join(out, name));
 }
 await mkdir(path.join(out, 'account-ui'), { recursive: true });
-for (const name of ['login.html', 'account.html', 'auth.css', 'auth.js', 'guide-account.css', 'guide-account.js']) {
+for (const name of ['login.html', 'account.html', 'auth.css', 'auth.js', 'guide-account.css', 'guide-account.js', 'upload.html', 'upload.css', 'upload.js']) {
   await cp(path.join(root, 'account-ui', name), path.join(out, 'account-ui', name));
 }
 await writeFile(path.join(out, 'robots.txt'), 'User-agent: *\nDisallow: /\n');

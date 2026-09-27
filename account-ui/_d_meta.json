@@ -20,8 +20,17 @@
           "status": "needs-review"
         }
       ]
+    },
+    "上传旅途照片": {
+      "versions": [
+        {
+          "path": "upload.html",
+          "createdAt": "2026-09-27T12:44:02.983Z",
+          "status": "needs-review"
+        }
+      ]
     }
   },
   "createdAt": "2026-09-24T11:10:00.248Z",
-  "updatedAt": "2026-09-24T11:10:00.286Z"
+  "updatedAt": "2026-09-27T12:44:02.998Z"
 }
