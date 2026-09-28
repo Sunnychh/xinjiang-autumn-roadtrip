@@ -1,5 +1,7 @@
 # 账号登录与后台
 
+> 2026-09-28：照片上传已选用纯 GitHub Pages 入口 [上传照片](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/)，使用浏览器内存中的 GitHub 令牌直连私有仓库，无需部署本文后端。本文保留用于原账号登录、准备清单和可选后端版上传。
+
 本次增加真实的服务端账号体系。原根目录 HTML 仍是原来的 GitHub Pages 公开路书；`npm run build` 会另外生成 `.worker-assets/`，由 Worker 检查登录状态后提供页面。只运行 GitHub Pages 不会启用这些后端功能。
 
 ## 已实现
