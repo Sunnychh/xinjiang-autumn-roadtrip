@@ -2,7 +2,7 @@
 
 2026 年 9 月 27 日至 10 月 8 日，2 人、12 天 11 晚。9/27 12:00 抵达乌鲁木齐；10/7 14:00 前一嗨还车；10/8 06:45 起飞。
 
-[在线行程](https://sunnychh.github.io/xinjiang-autumn-roadtrip/) · [11晚已订住宿](https://sunnychh.github.io/xinjiang-autumn-roadtrip/#hotels)
+[在线行程](https://sunnychh.github.io/xinjiang-autumn-roadtrip/) · [上传照片](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/) · [11晚已订住宿](https://sunnychh.github.io/xinjiang-autumn-roadtrip/#hotels)
 
 包含每日时间线、真实道路地图与方向箭头、景点当天游玩顺序、预约入口与备用方案、11家已订住宿及公开商户照片、景点餐厅参考、驾驶图表和可调整预算。已订事实来自用户提供的订单截图；本次只整理行程，未修改任何订单。
 
@@ -29,7 +29,7 @@
 
 ## 住宿对应的行程
 
-9/27更新：用户确认9/28独库不能通行，改为独山子→G30连霍→G577精伊→G578→尼勒克→S315东行→原古道民宿，道路参考479.3公里，按480公里、7.5—9小时驾驶预留。07:45出发，含餐休预计18:00—19:00到店。原订单保留为目标，但最后约1.88公里接入仍须店家确认合法可达；地图保留琥珀虚线。9/29是否恢复未确认，按S315西→尼勒克→G578墩麻扎→S12/G218→那拉提西绕，参考392.5公里，预留7—8.5小时驾驶。S316短线仅当天明确放行且天气合适时选用。9/29及后续酒店保留；仅接入或干线受阻时再协商9/28订单。
+9/28更新：用户已确认9/28独库不能通行、经绕行可到原古道民宿，保留原住宿。路线为独山子→G30连霍→G577精伊→G578→尼勒克→S315东行→原古道民宿，道路参考479.3公里，按480公里、7.5—9小时驾驶预留。07:45出发，含餐休预计18:00—19:00到店；最后约1.88公里按已确认的入口指引通行，地图末段仍为接入示意。到店确认来自用户，不代表孟克特景区恢复开放。9/29独库、S316及离店道路仍须当天复核，先按S315西→尼勒克→G578墩麻扎→S12/G218→那拉提西绕，参考392.5公里，预留7—8.5小时驾驶。S316短线仅当天明确放行且天气合适时选用。9/29及后续酒店保留；仅遇新增封路导致无法到店时，再协商9/28原订单并落实可达的替代住宿。
 
 9/30游那拉提后，16:30左右从游客中心开约67公里到新源汉庭。10/1退房、库尔德宁往返约156公里，目标16:00回外部停车场、18:00住新源维也纳。10/2由新源经特克斯到昭苏约224公里。10/3先退麗枫，游夏塔后住桔子，两晚不同店。
 
@@ -64,4 +64,14 @@
 
 出发准备已整理为按日期排列的 16 组、86 项事项，可筛选待完成与已完成。登录版按账号保存每次勾选及更新时间，支持刷新恢复和多页面冲突处理；GitHub Pages 静态版可阅读清单，保存进度需使用已连接后端的登录版。
 
-登录版新增 `/upload` 独立照片页，一次上传一张，附言可选。原图和 JSON 说明原子写入私有仓库 `Sunnychh/xinjiang-trip-memories` 的 `records/inbox/` 下，后续可读取分析实际执行和旅行回忆。本地用 `npm run dev:photos` 启动；手机远程使用需完成后端线上部署，原 GitHub Pages 静态页不能直接代替上传后端。详细配置见 [AUTH-DEPLOYMENT.md](AUTH-DEPLOYMENT.md)。
+## 私密照片上传（GitHub Pages）
+
+**[打开上传页](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/)**。网页由 GitHub Pages 托管，浏览器直接调用 GitHub API，原图与可选附言只进入私有仓库 `Sunnychh/xinjiang-trip-memories`，不需要 Cloudflare 或本地服务。
+
+第一次创建 fine-grained personal access token，仅选择照片仓库，开放 Contents 读写权限；以后每次打开页面粘贴令牌连接。令牌只驻留当前页面内存，不进入源码、网址、日志、Cookie、localStorage 或 sessionStorage；刷新、关闭、离开或断开后需重新连接。这里不使用攻略账号密码，GitHub 网页的登录状态也不能代替 API 令牌。
+
+一次一张，附言选填，支持 JPEG、PNG、WebP、HEIC / HEIF，最大 20 MiB。每张存入 `records/inbox/github-<GitHub账号ID>/<上传UUID>/photo.<扩展名>`，相邻 `record.json` 保存说明、原名、上传时间、哈希及上传者；拍摄时间和地点先留空，后续根据原图与说明分析。保留原始字节和原图已有 EXIF，手机选择器可能影响交付给网页的文件信息。
+
+提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。保存回执丢失时保留当前页面，再用相同编号查证或重试。刷新会丢失未完成上传的编号，不能保证刷新后重新上传不重复；成功后再上传新照片。网页公开可打开，照片目录仍只有有权限的 GitHub 账号能访问。不会自动邀请同行者或公开照片。
+
+实现位于 `upload/`，不依赖后端。原 Worker 登录版保留供未来使用；准备清单云端勾选、账号密码登录仍属于后端功能，本次仅发布照片上传入口。技术依据：[GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[API CORS](https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests)、[Git blobs](https://docs.github.com/en/rest/git/blobs)、[令牌安全](https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure)。
