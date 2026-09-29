@@ -74,7 +74,7 @@ GitHub Pages 从 main 分支根目录发布。index.html 内置脚本、样式�
 
 GitHub Actions 中的 `PHOTO_UPLOAD_TOKEN` 仅用于隔离的权限验证，不提供给公开网页，无法从 Actions secret 自动同步到手机。专用 token 仅选择 `Sunnychh/xinjiang-trip-memories` 并开放 Contents 读写权限；不能把广权限个人 CLI 令牌当作共享照片凭据。
 
-一次一张，附言选填，支持 JPEG、PNG、WebP、HEIC / HEIF，最大 20 MiB。每张存入 `records/inbox/github-<GitHub账号ID>/<上传UUID>/photo.<扩展名>`，相邻 `record.json` 保存说明、原名、上传时间、哈希及上传者；拍摄时间和地点先留空，后续根据原图与说明分析。保留原始字节和原图已有 EXIF，手机选择器可能影响交付给网页的文件信息。
+支持批量选择并依次保存，每张可单独填写附言，支持 JPEG、PNG、WebP、HEIC / HEIF，单张最大 20 MiB。列表显示每张的保存状态；校验未通过的照片不影响其他照片，网络中断后可在原页面继续核对和上传，跳过已经确认成功的照片。格式以实际文件内容为准，不因浏览器提供非标准或空 JPEG MIME 而拦截。每张存入 `records/inbox/github-<GitHub账号ID>/<上传UUID>/photo.<扩展名>`，相邻 `record.json` 保存说明、原名、上传时间、哈希及上传者；拍摄时间和地点先留空，后续根据原图与说明分析。保留原始字节和原图已有 EXIF，手机选择器可能影响交付给网页的文件信息。
 
 提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。保存回执丢失时保留当前页面，再用相同编号查证或重试。记住连接不等于保存待上传照片；刷新会丢失未完成上传的编号，不能保证刷新后重新上传不重复。若两人使用同一个 GitHub token，上传记录仍为同一个 GitHub 身份；可在附言中注明拍摄者。
 

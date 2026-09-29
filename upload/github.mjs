@@ -1,4 +1,4 @@
-import { detectImageType } from './image.mjs';
+import { detectImageType } from './image.mjs?v=20260929-jpeg';
 
 export const MAX_BYTES = 20 * 1024 * 1024;
 const API = 'https://api.github.com';

@@ -4,21 +4,48 @@ const same = (bytes, expected) => bytes.length === expected.length && expected.e
 
 function jpeg(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 20 || bytes[0] !== 0xff || bytes[1] !== 0xd8
-    || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) return false;
-  let at = 2, frame = false;
-  while (at < bytes.length - 2) {
+  if (bytes.length < 20 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return false;
+  let at = 2, frame = false, scan = false, entropy = false;
+  while (at < bytes.length) {
+    if (entropy) {
+      let pixels = false;
+      while (at < bytes.length) {
+        if (bytes[at++] !== 0xff) { pixels = true; continue; }
+        const markerStart = at - 1;
+        while (bytes[at] === 0xff) at++;
+        if (at >= bytes.length) return false;
+        const marker = bytes[at++];
+        if (marker === 0) { pixels = true; continue; } // Stuffed FF data byte.
+        if (marker >= 0xd0 && marker <= 0xd7) continue; // Restart marker.
+        if (marker === 0x01) continue; // Standalone arithmetic-coding marker.
+        if (!pixels) return false;
+        at = markerStart;
+        entropy = false;
+        break;
+      }
+      if (entropy) return false; // Scan was truncated before its closing marker.
+    }
     if (bytes[at++] !== 0xff) return false;
     while (bytes[at] === 0xff) at++;
+    if (at >= bytes.length) return false;
     const marker = bytes[at++];
-    if (at + 2 > bytes.length || marker === 0 || marker === 0xd8 || marker === 0xd9) return false;
+    // EOI ends the JPEG codestream, not necessarily the containing file (for
+    // example, a camera may append another image or other capture data).
+    if (marker === 0xd9) return frame && scan;
+    if (marker === 0x01) continue;
+    if (at + 2 > bytes.length || marker === 0 || marker === 0xd8
+      || (marker >= 0xd0 && marker <= 0xd7)) return false;
     const length = view.getUint16(at);
-    if (length < 2 || at + length > bytes.length - 2) return false;
+    if (length < 2 || at + length > bytes.length) return false;
     if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
-      if (length < 8 || !view.getUint16(at + 3) || !view.getUint16(at + 5)) return false;
+      if (length < 8 || !view.getUint16(at + 3) || !view.getUint16(at + 5)
+        || !bytes[at + 7] || length !== 8 + 3 * bytes[at + 7]) return false;
       frame = true;
     }
-    if (marker === 0xda) return frame && length >= 6 && at + length < bytes.length - 2;
+    if (marker === 0xda) {
+      if (!frame || length < 6 || !bytes[at + 2] || length !== 6 + 2 * bytes[at + 2]) return false;
+      scan = true; entropy = true;
+    }
     at += length;
   }
   return false;

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { connect, MAX_BYTES, PhotoError } from '../upload/github.mjs';
 
@@ -8,6 +9,10 @@ const TOKEN = 'github_pat_LOCAL_TEST_ONLY_12345678901234567890';
 const USER = { id: 73129, login: 'TestTraveller' };
 const ID = '22222222-2222-4222-8222-222222222222';
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8i8AAAAASUVORK5CYII=', 'base64');
+// Small generated colour patterns, encoded by Pillow/libjpeg (no personal photos).
+const JPEG = readFileSync(new URL('./fixtures/jpeg-baseline.jpg', import.meta.url));
+const PROGRESSIVE_JPEG = readFileSync(new URL('./fixtures/jpeg-progressive.jpg', import.meta.url));
+const RESTART_JPEG = readFileSync(new URL('./fixtures/jpeg-restart.jpg', import.meta.url));
 const sha = value => createHash('sha1').update(value).digest('hex');
 const file = (bytes = PNG, name = '山间.png', type = 'image/png') => new File([bytes], name, { type });
 const reply = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers });
@@ -134,6 +139,51 @@ test('prepare enforces 20 MiB, UUID, caption and real image signatures without a
   assert.equal(blank.record.caption, '');
   const detected = await client.prepare(file(PNG, 'wrong.jpg', 'image/jpeg'), '留住风景 🌄', ID);
   assert.equal(detected.record.mimeType, 'image/png');
+});
+
+test('real JPG and JPEG files use their contents despite extension case or missing/nonstandard MIME', async t => {
+  const g = graph(), client = await g.connect(), before = g.calls.length;
+  for (const [name, type] of [
+    ['photo.jpg', 'image/jpeg'], ['photo.JPG', 'image/jpeg'], ['photo.jpeg', ''],
+    ['photo.jpg', 'image/jpg'], ['photo.JPG', 'image/pjpeg'], ['photo.jpg', 'application/octet-stream'],
+  ]) await t.test(`${name} / ${type || '(empty)'}`, async () => {
+    const prepared = await client.prepare(file(JPEG, name, type), '', ID);
+    assert.equal(prepared.record.mimeType, 'image/jpeg');
+    assert.ok(prepared.record.photoPath.endsWith('/photo.jpg'));
+    assert.deepEqual(Buffer.from(prepared.bytes), JPEG);
+  });
+  assert.equal(g.calls.length, before, 'format detection does not upload bytes');
+});
+
+test('JPEG validation accepts progressive scans, restart markers, and intact images with appended capture data', async t => {
+  const g = graph(), client = await g.connect();
+  for (const [label, bytes] of [
+    ['progressive', PROGRESSIVE_JPEG], ['restart markers', RESTART_JPEG],
+    ['appended data', Buffer.concat([JPEG, Buffer.from('capture-data\0')])],
+    ['additional image', Buffer.concat([JPEG, PROGRESSIVE_JPEG])],
+  ]) await t.test(label, async () => {
+    const prepared = await client.prepare(file(bytes, 'photo.JPG', 'image/jpg'), '', ID);
+    assert.equal(prepared.record.mimeType, 'image/jpeg');
+    assert.deepEqual(Buffer.from(prepared.bytes), bytes, 'the original file and trailing data are preserved');
+  });
+});
+
+test('renamed text and incomplete JPEG structures remain rejected without upload writes', async t => {
+  const g = graph(), client = await g.connect();
+  const brokenSegment = Buffer.from(JPEG);
+  brokenSegment.writeUInt16BE(0xffff, 4);
+  for (const [label, bytes] of [
+    ['renamed text', Buffer.from('a text file named photo.jpg')],
+    ['markers around text', Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from('not an image'), Buffer.from([0xff, 0xd9])])],
+    ['truncated baseline', JPEG.subarray(0, -2)],
+    ['truncated progressive', PROGRESSIVE_JPEG.subarray(0, -2)],
+    ['out-of-bounds segment', brokenSegment],
+    ['missing image scan', Buffer.concat([JPEG.subarray(0, 20), Buffer.from([0xff, 0xd9])])],
+  ]) await t.test(label, async () => {
+    await assert.rejects(client.prepare(file(bytes, 'photo.jpg', 'image/jpeg'), '', ID),
+      error => safeError(error) && error.status === 415);
+  });
+  assert.equal(g.writes().length, 0);
 });
 
 test('save preserves original bytes and Unicode caption, publishing the photo and metadata atomically', async () => {

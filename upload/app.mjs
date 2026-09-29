@@ -1,15 +1,17 @@
-import { MAX_BYTES, PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-connection';
+import { PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-batch';
+import { PhotoQueue } from './queue.mjs?v=20260929-batch';
 import { loadDeviceConnection, getDeviceRevision, rememberDeviceToken, forgetDeviceToken, onDeviceForgotten } from './device-credential.mjs';
 
 const $ = id => document.getElementById(id);
-const acceptedTypes = ['image/jpeg','image/png','image/webp','image/heic','image/heif'];
-const extensions = {jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
+const queue = new PhotoQueue();
+const previewUrls = new Map();
+let selectedId = null;
 const inputs = [$('photo-library'),$('photo-camera')];
 let client = null, connecting = false, busy = false, checkingNetwork = false, connectionGeneration = 0;
 let deviceBusy = false, remembered = false, storageQueue = Promise.resolve();
 let clientRevision = null, autoRestoreAllowed = true;
-let photo = null, previewUrl = null, prepared = null, preparedOwner = null;
-let uncertain = false, receipt = null;
+const selectedPhoto = () => queue.items.find(item => item.id === selectedId);
+const hasUncertain = () => queue.uncertain;
 
 function setStatus(id,message,state='') { $(id).textContent=message; $(id).dataset.state=state; }
 function deviceOperation(operation) {
@@ -19,7 +21,7 @@ function deviceOperation(operation) {
 }
 function update() {
  const unavailable = !client || connecting || deviceBusy;
- const locked = busy || uncertain || unavailable;
+ const item=selectedPhoto(), locked=busy || unavailable;
  $('connect-form').hidden=!!client;
  $('connected-user').hidden=!client;
  $('github-token').disabled=connecting || busy || deviceBusy;
@@ -35,20 +37,24 @@ function update() {
  $('network-check').disabled=busy || connecting || deviceBusy || checkingNetwork;
  $('network-check').textContent=checkingNetwork?'正在检测…':'检测网络连接';
  $('upload-fields').disabled=unavailable;
- $('upload-submit').disabled=unavailable || !photo || busy || !!receipt;
- $('upload-submit').textContent=busy?'正在保存…':uncertain?'重新核对并上传':'保存这张照片 ↗';
- ['choose-photo','take-photo','remove-photo'].forEach(id=>{$(id).disabled=locked;});
- inputs.forEach(input=>{input.disabled=locked;});
- $('photo-caption').disabled=locked;
+ $('upload-submit').disabled=unavailable || busy || !queue.pending;
+ $('upload-submit').textContent=busy?'正在依次保存…':hasUncertain()?'核对并继续上传':queue.pending?`保存 ${queue.pending} 张照片 ↗`:'保存照片 ↗';
+ ['choose-photo','take-photo'].forEach(id=>{$(id).disabled=locked || hasUncertain();});
+ $('remove-photo').disabled=locked || !item || !!item.receipt || item.uncertain || !!item.prepared;
+ inputs.forEach(input=>{input.disabled=locked || hasUncertain();});
+ $('photo-caption').disabled=locked || !item || !!item.prepared || !!item.receipt;
  $('upload-form').setAttribute('aria-busy',String(busy));
- $('photo-info').hidden=!photo;
- $('photo-empty').hidden=!!photo;
- $('photo-preview').hidden=!photo;
- $('upload-form').hidden=!!receipt;
- $('upload-receipt').hidden=!receipt;
+ $('photo-info').hidden=!item;
+ $('photo-empty').hidden=!!item;
+ $('photo-preview').hidden=!item;
+ $('upload-form').hidden=queue.complete;
+ $('upload-receipt').hidden=!queue.complete;
+ renderQueue(locked);
+ if(queue.complete) renderReceipt();
 }
 function disconnectClient() {
  connectionGeneration++;
+ queue.interrupt();
  if(client) client.disconnect();
  client=null; clientRevision=null; connecting=false; checkingNetwork=false; deviceBusy=false;
  $('github-token').value='';
@@ -105,7 +111,7 @@ async function connectToken(token,{remember=false,fromStorage=false,generation,r
    setStatus('connection-status',labels[stage] || '正在连接…');
   }});
   if(generation!==connectionGeneration) return;
-  if(preparedOwner && uncertain && String(next.user.id)!==String(preparedOwner.id)) {
+  if(queue.items.some(item=>item.uncertain && item.owner && String(next.user.id)!==String(item.owner.id))) {
    setStatus('connection-status','上次上传尚未确认，请用原照片库账号的密钥连接后核对。','error');
    return;
   }
@@ -128,7 +134,7 @@ async function connectToken(token,{remember=false,fromStorage=false,generation,r
   }
   if(generation!==connectionGeneration) return;
   client=next; clientRevision=revision; next=null;
-  const message=uncertain?'已重新连接，可继续核对上次上传。':'照片库已连接，可以上传。';
+  const message=hasUncertain()?'已重新连接，可继续核对上次上传。':'照片库已连接，可以上传。';
   setStatus('connection-status',storageFailed?message+(remember?'但此设备未能记住本次连接，下次可能需要重新输入。':'但未能清除此设备之前保存的连接，请点击“忘记此设备”重试。'):message+(remembered?' 此设备会自动连接。':''),storageFailed?'notice':'success');
  } catch(error) {
   if(generation!==connectionGeneration) return;
@@ -185,8 +191,8 @@ $('forget-device').addEventListener('click',async()=>{
   if(generation!==connectionGeneration) return;
   if(removed!==true) throw new Error('Device connection was not removed');
   remembered=false;
-  if(!uncertain) reset();
-  setStatus('connection-status',uncertain?'已忘记此设备。上次上传尚未确认，请重新输入原照片库的密钥后核对。':'已忘记此设备，下次连接时需重新输入密钥。','success');
+  if(!hasUncertain()) reset();
+  setStatus('connection-status',hasUncertain()?'已忘记此设备。上次上传尚未确认，请重新输入原照片库的密钥后核对。':'已忘记此设备，下次连接时需重新输入密钥。','success');
  } catch {
   if(generation===connectionGeneration) {
    remembered=true;
@@ -195,62 +201,102 @@ $('forget-device').addEventListener('click',async()=>{
  } finally { if(generation===connectionGeneration) { deviceBusy=false; update(); } }
 });
 onDeviceForgotten(()=>{
- const wasBusy=busy;
  disconnectClient();
- if(wasBusy) uncertain=true;
  busy=false; remembered=false; autoRestoreAllowed=false;
  setStatus('connection-status','此设备的连接已在其他页面清除。需要上传时，请重新输入连接密钥。');
  update();
 });
-function clearPreview() { if(previewUrl) URL.revokeObjectURL(previewUrl); previewUrl=null; $('preview-image').removeAttribute('src'); }
+function previewFor(item) {
+ if(!previewUrls.has(item.id)) previewUrls.set(item.id,URL.createObjectURL(item.file));
+ return previewUrls.get(item.id);
+}
+function selectItem(id) {
+ selectedId=id;
+ const item=selectedPhoto();
+ $('preview-image').removeAttribute('src');
+ $('photo-caption').value=item?.caption || '';
+ $('caption-counter').textContent=($('photo-caption').value.length).toLocaleString('zh-CN')+' / 4,000';
+ if(item) {
+  $('photo-name').textContent=item.file.name;
+  $('photo-size').textContent=(item.file.size/1024/1024).toLocaleString('zh-CN',{maximumFractionDigits:2})+' MB';
+  $('preview-image').hidden=false; $('preview-fallback').hidden=true;
+  $('preview-image').src=previewFor(item);
+ }
+ update();
+}
+const statusLabels={pending:'待上传',preparing:'检查原图',uploading:'正在保存',saved:'已保存',invalid:'未通过校验',failed:'待重试',uncertain:'待核对'};
+function renderQueue(locked) {
+ const counts={saved:0,invalid:0};
+ queue.items.forEach(item=>{if(item.status in counts) counts[item.status]++;});
+ $('queue-summary').textContent=queue.items.length?`共 ${queue.items.length} 张 · 已保存 ${counts.saved} 张 · 待传 ${queue.pending} 张${counts.invalid?` · 未通过 ${counts.invalid} 张`:''}`:'';
+ $('photo-queue').hidden=!queue.items.length;
+ $('photo-queue').replaceChildren(...queue.items.map((item,index)=>{
+  const row=document.createElement('li'), button=document.createElement('button');
+  button.type='button'; button.className='queue-item'; button.disabled=locked;
+  button.setAttribute('aria-pressed',String(item.id===selectedId));
+  button.setAttribute('aria-label',`${index+1}. ${item.file.name}，${statusLabels[item.status] || '待上传'}，查看或编辑附言`);
+  button.dataset.state=item.status;
+  const thumb=document.createElement('img'); thumb.src=previewFor(item); thumb.alt=''; thumb.loading='lazy';
+  thumb.addEventListener('error',()=>{thumb.hidden=true;});
+  const details=document.createElement('span'); details.className='queue-details';
+  const name=document.createElement('strong'); name.textContent=item.file.name;
+  const state=document.createElement('span'); state.className='queue-state';
+  state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
+  details.append(name,state); button.append(thumb,details);
+  button.addEventListener('click',()=>{if(!busy) selectItem(item.id);}); row.append(button); return row;
+ }));
+}
 function reset() {
- clearPreview(); photo=null; prepared=null; preparedOwner=null; uncertain=false; receipt=null;
+ if(!queue.clear()) return;
+ for(const url of previewUrls.values()) URL.revokeObjectURL(url);
+ previewUrls.clear(); selectedId=null;
+ $('preview-image').removeAttribute('src');
  inputs.forEach(input=>{input.value='';});
  $('photo-caption').value=''; $('caption-counter').textContent='0 / 4,000';
  $('upload-progress-wrap').hidden=true;
  setStatus('photo-error',''); setStatus('upload-status',''); update();
 }
-function choose(file) {
- if(!client || connecting || deviceBusy || busy || uncertain || !file) return;
- const extension=file.name.split('.').at(-1)?.toLowerCase();
- const inferred=extensions[extension], type=file.type?.toLowerCase();
- if(!file.size) { setStatus('photo-error','这张照片是空文件，请重新选择。','error'); return; }
- if(file.size>MAX_BYTES) { setStatus('photo-error','这张照片超过 20 MB，请换一张较小的照片。','error'); return; }
- const unspecifiedType=!type || type==='application/octet-stream';
- if(unspecifiedType ? !acceptedTypes.includes(inferred) : !acceptedTypes.includes(type)) {
-  setStatus('photo-error','请选择 JPG、PNG、WebP、HEIC 或 HEIF 照片。','error'); return;
- }
- clearPreview(); photo=file; prepared=null; preparedOwner=null; uncertain=false;
- setStatus('photo-error',''); setStatus('upload-status','');
- $('photo-name').textContent=file.name;
- $('photo-size').textContent=(file.size/1024/1024).toLocaleString('zh-CN',{maximumFractionDigits:2})+' MB';
- $('preview-image').hidden=false; $('preview-fallback').hidden=true;
- previewUrl=URL.createObjectURL(file); $('preview-image').src=previewUrl;
- update();
+function choose(files) {
+ if(!client || connecting || deviceBusy || busy || hasUncertain() || !files?.length) return;
+ // Browser MIME metadata is inconsistent for JPG and phone exports. Check the
+ // actual bytes during prepare(), instead of rejecting a valid filename here.
+ const {added,errors}=queue.add(Array.from(files));
+ setStatus('photo-error',errors.map(({file,error})=>`${file.name}：${error.message}`).join('；'),errors.length?'error':'');
+ setStatus('upload-status','');
+ if(added.length) selectItem(added[0].id); else update();
 }
-$('preview-image').addEventListener('error',()=>{if(photo){$('preview-image').hidden=true;$('preview-fallback').hidden=false;}});
+$('preview-image').addEventListener('error',()=>{if(selectedPhoto()){$('preview-image').hidden=true;$('preview-fallback').hidden=false;}});
 $('choose-photo').addEventListener('click',()=>$('photo-library').click());
 $('take-photo').addEventListener('click',()=>$('photo-camera').click());
-inputs.forEach(input=>input.addEventListener('change',()=>{choose(input.files?.[0]);input.value='';}));
-$('remove-photo').addEventListener('click',()=>{reset();$('choose-photo').focus();});
-$('photo-caption').addEventListener('input',()=>{$('caption-counter').textContent=$('photo-caption').value.length.toLocaleString('zh-CN')+' / 4,000';});
+inputs.forEach(input=>input.addEventListener('change',()=>{choose(input.files);input.value='';}));
+$('remove-photo').addEventListener('click',()=>{
+ if(busy || !selectedId || !queue.remove(selectedId)) return;
+ if(previewUrls.has(selectedId)) URL.revokeObjectURL(previewUrls.get(selectedId));
+ previewUrls.delete(selectedId);
+ selectItem(queue.items.find(item=>!item.receipt)?.id || queue.items[0]?.id || null);
+ $('choose-photo').focus();
+});
+$('photo-caption').addEventListener('input',()=>{
+ const item=selectedPhoto();
+ if(!item || busy || item.prepared || item.receipt) return;
+ item.caption=$('photo-caption').value;
+ $('caption-counter').textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
+});
 $('upload-next').addEventListener('click',()=>{reset();$('choose-photo').focus();});
-function setProgress({percent,label}) {
+function setProgress(item,{percent,label}) {
  $('upload-progress-wrap').hidden=false;
- $('upload-progress-label').textContent=typeof label==='string'?label:'正在保存照片…';
- $('upload-progress-value').textContent=Number.isFinite(percent)?Math.round(Math.max(0,Math.min(100,percent)))+'%':'';
- if(Number.isFinite(percent)) $('upload-progress').value=Math.max(0,Math.min(100,percent)); else $('upload-progress').removeAttribute('value');
+ const saved=queue.items.filter(photo=>photo.receipt).length;
+ $('upload-progress-label').textContent=`第 ${queue.items.indexOf(item)+1} / ${queue.items.length} 张 · ${label || '正在保存照片…'}`;
+ $('upload-progress-value').textContent=`已保存 ${saved} 张`;
+ if(Number.isFinite(percent)) $('upload-progress').value=Math.max(0,Math.min(100,(saved+percent/100)/queue.items.length*100));
+ else $('upload-progress').removeAttribute('value');
 }
-function showReceipt(result) {
- const record=result?.record;
- if(!record || typeof record.originalName!=='string' || typeof record.caption!=='string' || !result.commitSha) throw new Error('未收到完整保存回执');
- receipt=record; uncertain=false;
- $('receipt-file').textContent=record.originalName;
- $('receipt-caption').textContent=record.caption;
- $('receipt-caption').hidden=!record.caption;
- const date=typeof record.uploadedAt==='number'?new Date(record.uploadedAt<1e12?record.uploadedAt*1000:record.uploadedAt):new Date(record.uploadedAt);
- $('receipt-time').textContent=Number.isNaN(date.getTime())?'已确认保存':new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(date)+' · 保存成功';
- $('upload-progress-wrap').hidden=true; update(); $('receipt-title').focus();
+function renderReceipt() {
+ $('receipt-title').textContent=`${queue.items.length} 张照片已保存`;
+ $('receipt-file').textContent=queue.items.map(item=>item.file.name).join(' · ');
+ $('receipt-time').textContent='已确认原图与附言保存成功';
+ const caption=queue.items.length===1?queue.items[0].caption:'';
+ $('receipt-caption').textContent=caption; $('receipt-caption').hidden=!caption;
 }
 async function requireReconnect() {
  const revision=clientRevision;
@@ -264,74 +310,44 @@ async function requireReconnect() {
  deviceBusy=false; update();
  return true;
 }
-function showActionableError(error) {
- if(!(error instanceof PhotoError) || (!['PERMISSION','PRIVATE','CONFIG','ACCOUNT','CONFLICT'].includes(error.code) && error.status!==403)) return false;
- let guidance='保存结果仍未确认，请保留本页和原图。';
- if(error.code==='PERMISSION' || error.code==='ACCOUNT' || (error.status===403 && !error.code)) {
-  disconnectClient();
-  busy=false;
-  guidance='请联系管理员检查照片库连接权限。恢复连接后，再核对这张照片。';
-  setStatus('connection-status',guidance,'error');
-  update();
- }
- setStatus('upload-status',connectionError(error)+' '+guidance,'error');
- return true;
-}
-async function reconcile(uploadClient,generation) {
- setProgress({label:'正在核对照片是否已保存…'});
- try {
-  const result=await uploadClient.lookup(prepared);
-  if(generation!==connectionGeneration) return;
-  if(result) { showReceipt(result); return; }
-  setStatus('upload-status','暂未找到保存回执。请点击“重新核对并上传”，会继续处理同一张照片。','notice');
- } catch(error) {
-  if(generation!==connectionGeneration) return;
-  if(authenticationError(error)) { if(!await requireReconnect()) return; }
-  else if(showActionableError(error)) return;
-  setStatus('upload-status','暂时无法确认保存结果。请保留此页，稍后重新核对并上传。','notice');
- }
-}
 $('upload-form').addEventListener('submit',async event=>{
  event.preventDefault();
- if(!client || connecting || deviceBusy || !photo || busy || receipt) return;
+ if(!client || connecting || deviceBusy || !queue.pending || busy) return;
  const uploadClient=client, generation=connectionGeneration;
- busy=true; setStatus('upload-status','上传期间请保持页面打开。'); update();
+ busy=true; setStatus('upload-status','正在依次保存。请保持页面打开。'); update();
  try {
-  if(!prepared) {
-   setProgress({label:'正在检查原图…'});
-   try {
-    const nextPrepared=await uploadClient.prepare(photo,$('photo-caption').value);
-    if(generation!==connectionGeneration) return;
-    prepared=nextPrepared;
-    preparedOwner={id:uploadClient.user.id,login:uploadClient.user.login};
-   } catch(error) {
-    if(generation!==connectionGeneration) return;
-    if(authenticationError(error)) { if(!await requireReconnect()) return; }
-    setStatus('upload-status',error instanceof PhotoError ? '照片尚未上传。'+(error.code==='INVALID'?error.message:connectionError(error)) : '照片尚未上传。请检查图片格式、大小和附言，或重新选择照片后重试。','error');
-    return;
+  const result=await queue.run(uploadClient,{
+   isCurrent:()=>generation===connectionGeneration,
+   onChange:()=>{if(generation===connectionGeneration) update();},
+   onProgress:(item,progress)=>{if(generation===connectionGeneration) setProgress(item,progress);}
+  });
+  if(generation!==connectionGeneration || result.stale) return;
+  if(result.error) {
+   if(authenticationError(result.error)) {
+    if(!await requireReconnect()) return;
+   } else if(['PERMISSION','ACCOUNT'].includes(result.error.code)) {
+    disconnectClient(); busy=false;
+    setStatus('connection-status',connectionError(result.error),'error');
+    update();
    }
+   setStatus('upload-status',connectionError(result.error)+' 已成功的照片会保留；请保持本页，恢复连接后继续上传。','error');
+  } else if(!queue.complete) {
+   setStatus('upload-status','可上传的照片已处理。未通过校验的照片标在列表中，可以移除或重新选择。','notice');
+  } else {
+   setStatus('upload-status','全部照片已保存。','success');
+   $('receipt-title').focus();
   }
-  if(uncertain) {
-   setProgress({label:'正在核对上次保存结果…'});
-   const result=await uploadClient.lookup(prepared);
-   if(generation!==connectionGeneration) return;
-   if(result) { showReceipt(result); return; }
+ } catch {
+  if(generation===connectionGeneration) {
+   queue.interrupt();
+   setStatus('upload-status','暂未完成本批上传。请保留本页和原图，稍后继续核对。','error');
   }
-  uncertain=true;
-  const result=await uploadClient.save(prepared,progress=>{if(generation===connectionGeneration) setProgress(progress);});
-  if(generation!==connectionGeneration) return;
-  showReceipt(result);
- } catch(error) {
-  if(generation!==connectionGeneration) return;
-  uncertain=true;
-  if(authenticationError(error)) {
-   if(!await requireReconnect()) return;
-   setStatus('upload-status','当前保存结果尚未确认。重新连接后，请继续核对这一张照片。','notice');
-  } else if(!showActionableError(error)) await reconcile(uploadClient,generation);
- } finally { if(generation===connectionGeneration) { busy=false; $('upload-progress-wrap').hidden=true; update(); } }
+ } finally {
+  if(generation===connectionGeneration) { busy=false; $('upload-progress-wrap').hidden=true; update(); }
+ }
 });
-window.addEventListener('beforeunload',event=>{if(busy || uncertain){event.preventDefault();event.returnValue='';}});
-window.addEventListener('pagehide',()=>{disconnectClient();if(busy) uncertain=true;busy=false;update();});
+window.addEventListener('beforeunload',event=>{if(busy || hasUncertain() || queue.pending){event.preventDefault();event.returnValue='';}});
+window.addEventListener('pagehide',()=>{disconnectClient();busy=false;update();});
 window.addEventListener('pageshow',event=>{if(event.persisted && !client && autoRestoreAllowed) void restoreDeviceConnection();});
 setStatus('connection-status','正在准备照片库…');
 update();

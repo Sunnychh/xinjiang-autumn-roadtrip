@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
+import { PhotoError } from '../upload/github.mjs?v=20260929-batch';
+import { PhotoQueue } from '../upload/queue.mjs?v=20260929-batch';
 
-// Only the UI source and its HTML are read. Imports are removed before execution;
-// credentials, device storage, GitHub and browser APIs are all independent stubs.
+// Exercise the UI with the real queue while stubbing credentials, device storage,
+// remote GitHub operations and browser APIs. No real tokens or photos are used.
 const source = readFileSync(new URL('../upload/app.mjs', import.meta.url), 'utf8')
   .replace(/^import\s[^;]+;\s*$/gm, '');
 const html = readFileSync(new URL('../upload/index.html', import.meta.url), 'utf8');
@@ -20,14 +22,8 @@ async function flush() {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 }
 
-class PhotoError extends Error {
-  constructor(message, status = 0, code = 'NETWORK') {
-    super(message); this.status = status; this.code = code;
-  }
-}
-
 class Element {
-  constructor(id, tag) {
+  constructor(id = '', tag = '') {
     this.id = id;
     this.hidden = /\bhidden\b/.test(tag);
     this.disabled = /\bdisabled\b/.test(tag);
@@ -38,6 +34,7 @@ class Element {
     this.attributes = {};
     this.files = [];
     this.listeners = new Map();
+    this.children = [];
   }
   addEventListener(name, listener) {
     const listeners = this.listeners.get(name) || [];
@@ -50,6 +47,8 @@ class Element {
   }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   removeAttribute(name) { delete this.attributes[name]; }
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = [...nodes]; }
   focus() { this.focused = true; }
   click() { if (!this.disabled) this.emit('click'); }
 }
@@ -72,7 +71,7 @@ function fixture(options = {}) {
     },
   };
   const context = vm.createContext({
-    document: { getElementById: element }, window, PhotoError,
+    document: { getElementById: element, createElement: tag => new Element('', tag) }, window, PhotoError, PhotoQueue,
     MAX_BYTES: 20 * 1024 * 1024,
     connect(token, callbacks = {}) {
       const pending = deferred();
@@ -132,9 +131,20 @@ function fixture(options = {}) {
       await flush();
     },
     async click(id) { element(id).click(); await flush(); },
-    async selectPhoto() {
-      element('photo-library').files = [{ name: 'test.jpg', size: 20, type: 'image/jpeg' }];
+    async selectPhoto(files = [{ name: 'test.jpg', size: 20, type: 'image/jpeg' }]) {
+      element('photo-library').files = files;
       element('photo-library').emit('change');
+      await flush();
+    },
+    async selectItem(index) {
+      const row = element('photo-queue').children[index];
+      assert.ok(row, `Photo queue item ${index} must exist`);
+      row.children[0].click();
+      await flush();
+    },
+    async caption(value) {
+      element('photo-caption').value = value;
+      element('photo-caption').emit('input');
       await flush();
     },
     async upload() { element('upload-form').emit('submit'); await flush(); },
@@ -152,7 +162,8 @@ function client(overrides = {}) {
     user: { id: 123, login: 'TestTraveller' }, disconnected: 0,
     disconnect() { this.disconnected++; },
     async prepare(file, caption) {
-      return { record: { id: 'test-upload', originalName: file.name, caption,
+      return { record: { id: `test-upload-${file.name}`, originalName: file.name, caption,
+        photoPath: `records/inbox/test/${file.name}`,
         uploadedAt: '2026-09-29T12:00:00Z' } };
     },
     async lookup() { return null; },
@@ -535,4 +546,273 @@ test('401 after an opted-out connection does not claim a nonexistent saved token
   assert.equal(countStorage(f, 'forget'), before, 'No saved connection belongs to this opted-out session');
   assert.doesNotMatch(status(f), /暂未清除|未能清除/);
   assert.equal(f.element('retry-connection').hidden, true);
+});
+
+const batchPhotos = () => [
+  { name: 'morning.jpg', size: 20, type: 'image/jpg' },
+  { name: 'mountain.JPG', size: 20, type: 'image/pjpeg' },
+  { name: 'sunset.jpg', size: 20, type: '' },
+];
+const queueStates = f => f.element('photo-queue').children.map(row => row.children[0].dataset.state);
+const receipt = prepared => ({ record: prepared.record, commitSha: 'b'.repeat(40) });
+
+test('multiple file picker accepts JPG MIME aliases and empty MIME metadata into the batch', async () => {
+  assert.match(html.match(/<input[^>]*id="photo-library"[^>]*>/)?.[0] || '', /\bmultiple\b/);
+  const { f } = await connected();
+  await f.selectPhoto(batchPhotos());
+  assert.deepEqual(queueStates(f), ['pending', 'pending', 'pending']);
+  assert.equal(f.previewCount, 3);
+  assert.equal(f.element('photo-error').textContent, '');
+  assert.match(f.element('queue-summary').textContent, /共 3 张/);
+  assert.equal(f.element('upload-submit').disabled, false);
+});
+
+test('each selected photo keeps its own optional caption and uploads in selection order', async () => {
+  const prepared = [], saved = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+    async save(item) { saved.push(item.record.originalName); return receipt(item); },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('早晨出发');
+  await f.selectItem(1);
+  assert.equal(f.element('photo-caption').value, '');
+  await f.caption('山路观景台');
+  await f.selectItem(2);
+  assert.equal(f.element('photo-caption').value, '');
+  await f.selectItem(0);
+  assert.equal(f.element('photo-caption').value, '早晨出发');
+  await f.selectItem(1);
+  assert.equal(f.element('photo-caption').value, '山路观景台');
+  await f.upload();
+  assert.deepEqual(prepared, [
+    ['morning.jpg', '早晨出发'], ['mountain.JPG', '山路观景台'], ['sunset.jpg', ''],
+  ]);
+  assert.deepEqual(saved, ['morning.jpg', 'mountain.JPG', 'sunset.jpg']);
+  assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
+  assert.equal(f.element('upload-receipt').hidden, false);
+  assert.equal(f.element('upload-form').hidden, true);
+  assert.equal(f.element('receipt-title').textContent, '3 张照片已保存');
+  assert.match(f.element('receipt-file').textContent, /morning\.jpg.*mountain\.JPG.*sunset\.jpg/);
+  assert.equal(f.element('receipt-caption').hidden, true, 'A batch receipt must not attribute one caption to every photo');
+});
+
+test('only one photo is prepared or saved at a time and progress identifies the current item', async () => {
+  const firstSave = deferred(), prepared = [], saved = [], original = client();
+  let firstProgress, firstPrepared;
+  const { f } = await connected({}, {
+    async prepare(file, caption) { prepared.push(file.name); return original.prepare(file, caption); },
+    save(item, onProgress) {
+      saved.push(item.record.originalName);
+      if (saved.length === 1) { firstProgress = onProgress; firstPrepared = item; return firstSave.promise; }
+      return Promise.resolve(receipt(item));
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.upload();
+  assert.deepEqual(prepared, ['morning.jpg']);
+  assert.deepEqual(saved, ['morning.jpg']);
+  assert.deepEqual(queueStates(f), ['uploading', 'pending', 'pending']);
+  firstProgress({ percent: 50, label: '正在提交原图' });
+  assert.equal(f.element('upload-progress-wrap').hidden, false);
+  assert.match(f.element('upload-progress-label').textContent, /第 1 \/ 3 张.*正在提交原图/);
+  assert.equal(f.element('upload-submit').disabled, true);
+  assert.equal(f.element('photo-caption').disabled, true);
+  assert.equal(f.element('choose-photo').disabled, true);
+  firstSave.resolve(receipt(firstPrepared));
+  await flush();
+  assert.deepEqual(prepared, ['morning.jpg', 'mountain.JPG', 'sunset.jpg']);
+  assert.deepEqual(saved, prepared);
+  assert.equal(f.element('upload-progress-wrap').hidden, true);
+  assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+test('an invalid image is marked in the batch while remaining photos still save', async () => {
+  const saved = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      if (file.name === 'mountain.JPG') throw new PhotoError('照片内容不是有效图片', 400, 'INVALID');
+      return original.prepare(file, caption);
+    },
+    async save(item) { saved.push(item.record.originalName); return receipt(item); },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.upload();
+  assert.deepEqual(saved, ['morning.jpg', 'sunset.jpg']);
+  assert.deepEqual(queueStates(f), ['saved', 'invalid', 'saved']);
+  assert.match(f.element('queue-summary').textContent, /已保存 2 张.*未通过 1 张/);
+  assert.equal(f.element('upload-receipt').hidden, true, 'The UI must not claim every photo was saved');
+  await f.selectItem(1);
+  assert.equal(f.element('remove-photo').disabled, false);
+  await f.click('remove-photo');
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+  assert.equal(f.element('receipt-title').textContent, '2 张照片已保存');
+  assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+test('an empty selection entry does not block the other selected photos', async () => {
+  const { f } = await connected();
+  await f.selectPhoto([{ name: 'empty.jpg', size: 0, type: 'image/jpeg' }, ...batchPhotos()]);
+  assert.deepEqual(queueStates(f), ['pending', 'pending', 'pending']);
+  assert.match(f.element('photo-error').textContent, /empty\.jpg/);
+  await f.upload();
+  assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
+  assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+test('retry after the second photo loses network skips saved photos and preserves the unresolved upload', async () => {
+  const prepared = [], saved = [], lookups = [], original = client();
+  let failed = false, unresolved;
+  const { f } = await connected({}, {
+    async prepare(file, caption) { prepared.push(file.name); return original.prepare(file, caption); },
+    async save(item) {
+      saved.push(item.record.originalName);
+      if (item.record.originalName === 'mountain.JPG' && !failed) {
+        failed = true; unresolved = item;
+        throw new PhotoError('offline', 0, 'NETWORK');
+      }
+      if (item.record.originalName === 'mountain.JPG') assert.equal(item, unresolved, 'Retry must reuse the prepared photo and UUID');
+      return receipt(item);
+    },
+    async lookup(item) { lookups.push(item); return null; },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.upload();
+  assert.deepEqual(queueStates(f), ['saved', 'uncertain', 'pending']);
+  assert.deepEqual(saved, ['morning.jpg', 'mountain.JPG']);
+  assert.deepEqual(prepared, ['morning.jpg', 'mountain.JPG']);
+  assert.equal(f.element('choose-photo').disabled, true);
+  assert.equal(f.element('upload-submit').disabled, false);
+  assert.match(f.element('upload-submit').textContent, /核对/);
+  await f.upload();
+  assert.deepEqual(saved, ['morning.jpg', 'mountain.JPG', 'mountain.JPG', 'sunset.jpg']);
+  assert.deepEqual(prepared, ['morning.jpg', 'mountain.JPG', 'sunset.jpg']);
+  assert.deepEqual(lookups, [unresolved, unresolved]);
+  assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
+  assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+for (const [code, httpStatus] of [['PERMISSION', 403], ['ACCOUNT', 409]]) {
+  test(`${code} during batch upload exposes reconnect controls and retains successful and unresolved photos`, async () => {
+    const original = client(), saved = [], preparedAfterReconnect = [], lookedUp = [];
+    let unresolved;
+    const { f, connection } = await connected({ stored: TEST_TOKEN }, {
+      async save(item) {
+        saved.push(item.record.originalName);
+        if (item.record.originalName === 'mountain.JPG') {
+          unresolved = item;
+          throw new PhotoError('Reconnect required', httpStatus, code);
+        }
+        return receipt(item);
+      },
+    });
+    await f.selectPhoto(batchPhotos());
+    await f.selectItem(1);
+    await f.caption('第二张说明应在重连后保留');
+    await f.upload();
+    assert.equal(connection.disconnected, 1);
+    assert.equal(f.element('connect-form').hidden, false);
+    assert.equal(f.element('connected-user').hidden, true);
+    assert.equal(f.element('github-token').disabled, false);
+    assert.equal(f.element('connect-button').disabled, false);
+    assert.equal(f.element('upload-submit').disabled, true);
+    assert.equal(f.element('upload-form').attributes['aria-busy'], 'false');
+    assert.equal(f.element('upload-progress-wrap').hidden, true);
+    assert.deepEqual(queueStates(f), ['saved', 'uncertain', 'pending']);
+    assert.equal(f.element('upload-receipt').hidden, true);
+    assert.equal(f.stored, TEST_TOKEN, 'A permission failure must not erase an otherwise valid saved credential');
+
+    await f.submit();
+    assert.equal(f.connections.length, 2);
+    f.connections[1].resolve(client({
+      async prepare(file, caption) {
+        preparedAfterReconnect.push(file.name);
+        return original.prepare(file, caption);
+      },
+      async lookup(item) { lookedUp.push(item); return null; },
+      async save(item) {
+        saved.push(item.record.originalName);
+        if (item.record.originalName === 'mountain.JPG') {
+          assert.equal(item, unresolved, 'Reconnection must retain the original prepared upload and UUID');
+          assert.equal(item.record.caption, '第二张说明应在重连后保留');
+        }
+        return receipt(item);
+      },
+    }));
+    await flush();
+    assert.equal(f.element('connect-form').hidden, true);
+    assert.equal(f.element('upload-submit').disabled, false);
+    await f.upload();
+    assert.deepEqual(lookedUp, [unresolved]);
+    assert.deepEqual(preparedAfterReconnect, ['sunset.jpg']);
+    assert.deepEqual(saved, ['morning.jpg', 'mountain.JPG', 'mountain.JPG', 'sunset.jpg']);
+    assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
+    assert.equal(f.element('receipt-title').textContent, '3 张照片已保存');
+    assert.equal(f.element('upload-receipt').hidden, false);
+  });
+}
+
+test('a late preparation cannot overwrite a new active batch after a pagehide and reconnect', async () => {
+  const oldPrepare = deferred(), newPrepare = deferred(), original = client();
+  let oldSaves = 0, newSaves = 0;
+  const { f } = await connected({ stored: TEST_TOKEN }, {
+    prepare: () => oldPrepare.promise,
+    async save() { oldSaves++; throw new Error('Stale preparation must not save'); },
+  });
+  await f.selectPhoto(batchPhotos().slice(0, 1));
+  await f.caption('保留这张说明');
+  await f.upload();
+  await f.event('pagehide');
+  await f.event('pageshow', { persisted: true });
+  f.connections[1].resolve(client({
+    prepare: () => newPrepare.promise,
+    async save(item) { newSaves++; return receipt(item); },
+  }));
+  await flush();
+  await f.upload();
+  oldPrepare.resolve(await original.prepare(batchPhotos()[0], '旧回调不应覆盖'));
+  await flush();
+  assert.equal(oldSaves, 0);
+  assert.equal(newSaves, 0);
+  assert.equal(f.element('upload-form').attributes['aria-busy'], 'true');
+  assert.deepEqual(queueStates(f), ['preparing']);
+  newPrepare.resolve(await original.prepare(batchPhotos()[0], '保留这张说明'));
+  await flush();
+  assert.equal(newSaves, 1);
+  assert.equal(f.element('receipt-caption').textContent, '保留这张说明');
+  assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+test('late save completion and progress cannot alter a new reconciliation after pagehide', async () => {
+  const oldSave = deferred(), newLookup = deferred();
+  let oldPrepared, oldProgress, newSaves = 0;
+  const { f } = await connected({ stored: TEST_TOKEN }, {
+    save(item, progress) { oldPrepared = item; oldProgress = progress; return oldSave.promise; },
+  });
+  await f.selectPhoto(batchPhotos().slice(0, 1));
+  await f.upload();
+  await f.event('pagehide');
+  await f.event('pageshow', { persisted: true });
+  f.connections[1].resolve(client({
+    lookup: () => newLookup.promise,
+    async save(item) { newSaves++; return receipt(item); },
+  }));
+  await flush();
+  await f.upload();
+  const previous = status(f), progressLabel = f.element('upload-progress-label').textContent;
+  oldProgress({ percent: 100, label: '旧连接已保存' });
+  oldSave.resolve(receipt(oldPrepared));
+  await flush();
+  assert.equal(status(f), previous);
+  assert.equal(f.element('upload-progress-label').textContent, progressLabel);
+  assert.equal(f.element('upload-form').attributes['aria-busy'], 'true');
+  assert.equal(f.element('upload-receipt').hidden, true);
+  newLookup.resolve(receipt(oldPrepared));
+  await flush();
+  assert.equal(newSaves, 0, 'A confirmed existing receipt avoids saving the same photo again');
+  assert.deepEqual(queueStates(f), ['saved']);
+  assert.equal(f.element('upload-receipt').hidden, false);
 });
