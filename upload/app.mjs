@@ -71,7 +71,12 @@ $('network-check').addEventListener('click',async()=>{
   await probeGitHub();
   if(generation!==connectionGeneration) return;
   setStatus('network-status','网络连接正常。照片库连接失败时，可以再试一次。','success');
- } catch(error) { if(generation===connectionGeneration) setStatus('network-status',connectionError(error),'error'); }
+ } catch(error) {
+  if(generation===connectionGeneration) setStatus('network-status',
+   error instanceof PhotoError && error.code==='PERMISSION'
+    ? `GitHub 网络检测接口返回 HTTP ${error.status}，暂时无法完成检测；这不代表照片库密钥无效。`
+    : connectionError(error),'error');
+ }
  finally { if(generation===connectionGeneration) { checkingNetwork=false; update(); } }
 });
 function beginConnection(message='正在连接照片库…') {
