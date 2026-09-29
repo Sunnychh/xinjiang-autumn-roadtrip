@@ -149,7 +149,8 @@ test('real JPG and JPEG files use their contents despite extension case or missi
   ]) await t.test(`${name} / ${type || '(empty)'}`, async () => {
     const prepared = await client.prepare(file(JPEG, name, type), '', ID);
     assert.equal(prepared.record.mimeType, 'image/jpeg');
-    assert.ok(prepared.record.photoPath.endsWith('/photo.jpg'));
+    assert.match(prepared.record.fileName, /^新疆旅行_\d{8}_001_22222222\.jpg$/);
+    assert.ok(prepared.record.photoPath.endsWith(`/${prepared.record.fileName}`));
     assert.deepEqual(Buffer.from(prepared.bytes), JPEG);
   });
   assert.equal(g.calls.length, before, 'format detection does not upload bytes');
@@ -194,6 +195,9 @@ test('save preserves original bytes and Unicode caption, publishing the photo an
   assert.equal(prepared.record.caption, caption);
   assert.equal(prepared.record.captureTime, null);
   assert.equal(prepared.record.location, null);
+  assert.equal(prepared.record.originalName, 'IMG_20010101_000000.png');
+  assert.match(prepared.record.fileName, /^新疆旅行_\d{8}_001_22222222\.png$/);
+  assert.equal(prepared.record.displayName, prepared.record.fileName.slice(0, -4));
   assert.ok(Date.parse(prepared.record.uploadedAt) >= Math.floor(start / 1000) * 1000);
   assert.deepEqual(prepared.record.uploader, { id: `github-${USER.id}`, username: USER.login, provider: 'github' });
   const result = await client.save(prepared);
@@ -208,6 +212,43 @@ test('save preserves original bytes and Unicode caption, publishing the photo an
   assert.equal(g.writes().find(call => call.path === '/git/trees').body.tree.length, 2);
   assert.ok(g.calls.at(-1).method === 'GET', 'success is confirmed by reading reachable metadata after ref publication');
   assert.ok(!JSON.stringify(result).includes(TOKEN));
+});
+
+test('explicit stable names preserve the selection date and use the detected extension', async () => {
+  const g = graph(), client = await g.connect(), before = g.calls.length;
+  const nameBase = '新疆旅行_20260929_008_22222222';
+  const prepared = await client.prepare(file(PNG, 'IMG_20010101_000000.JPG', 'image/jpeg'), '', ID, { nameBase });
+  assert.equal(prepared.record.fileName, `${nameBase}.png`);
+  assert.equal(prepared.record.displayName, nameBase);
+  assert.equal(prepared.record.photoPath, `${prepared.directory}/${nameBase}.png`);
+  assert.equal(prepared.record.originalName, 'IMG_20010101_000000.JPG');
+  assert.equal(prepared.record.captureTime, null, 'the naming date does not become capture metadata');
+  for (const badName of ['../photo', `${nameBase}.png`, nameBase.replace('22222222', '11111111'),
+    '新疆旅行_20260230_008_22222222', '新疆旅行_20260929_000_22222222', '新疆旅行_20260929_0008_22222222']) {
+    await assert.rejects(client.prepare(file(), '', ID, { nameBase: badName }), error => safeError(error) && error.code === 'INVALID');
+  }
+  assert.equal(g.calls.length, before, 'invalid names never make an upload request');
+});
+
+test('receipt lookup accepts older metadata without name fields and rejects mismatched new fields', async () => {
+  const g = graph(), client = await g.connect();
+  const prepared = await client.prepare(file(), '', ID, { nameBase: '新疆旅行_20260929_001_22222222' });
+  await client.save(prepared);
+  const metadataPath = `${prepared.directory}/record.json`, writeCount = g.writes().length;
+  const updateStored = metadata => {
+    const bytes = Buffer.from(JSON.stringify(metadata)), hash = sha(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes]));
+    g.blobs.set(hash, bytes); g.visible().set(metadataPath, hash);
+  };
+  const legacy = { ...prepared.record }; delete legacy.fileName; delete legacy.displayName;
+  updateStored(legacy);
+  const receipt = await client.lookup(prepared);
+  assert.equal(receipt.record.id, ID);
+  assert.equal(receipt.record.fileName, prepared.record.fileName);
+  for (const field of ['fileName', 'displayName']) {
+    updateStored({ ...prepared.record, [field]: 'a-different-name' });
+    await assert.rejects(client.lookup(prepared), error => safeError(error) && error.code === 'CONFLICT');
+  }
+  assert.equal(g.writes().length, writeCount, 'lookup does not migrate or overwrite stored metadata');
 });
 
 test('same upload is idempotent, while a changed caption with the same UUID conflicts', async () => {

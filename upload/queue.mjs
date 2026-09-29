@@ -1,4 +1,5 @@
-import { MAX_BYTES, PhotoError } from './github.mjs?v=20260929-batch';
+import { MAX_BYTES, PhotoError } from './github.mjs?v=20260929-cards';
+import { createNameBase, previewFileName } from './naming.mjs?v=20260929-cards';
 
 const BUSY = new Set(['preparing', 'uploading']);
 const NO_RECOVERY_LOOKUP = new Set(['AUTH', 'PERMISSION', 'PRIVATE', 'CONFIG', 'ACCOUNT']);
@@ -11,6 +12,8 @@ function confirmedReceipt(receipt, prepared) {
   if (!/^[a-f0-9]{40}$/i.test(receipt?.commitSha || '') || !record
     || typeof record.originalName !== 'string' || typeof record.caption !== 'string'
     || record.id !== prepared.record.id || record.photoPath !== prepared.record.photoPath
+    || (record.fileName !== undefined && record.fileName !== prepared.record.fileName)
+    || (record.displayName !== undefined && record.displayName !== prepared.record.displayName)
     || record.caption !== prepared.record.caption) {
     throw new PhotoError('尚未收到完整的照片保存回执，请保留当前页面后重试核对。', 502, 'RESPONSE');
   }
@@ -23,6 +26,12 @@ export class PhotoQueue {
   items = [];
   #nextId = 1;
   #run = null;
+  #now;
+  #randomUUID;
+
+  constructor({ now = () => new Date(), randomUUID = () => crypto.randomUUID() } = {}) {
+    this.#now = now; this.#randomUUID = randomUUID;
+  }
 
   get uncertain() { return this.items.some(item => item.uncertain); }
   get pending() { return this.items.filter(item => !['saved', 'invalid'].includes(item.status)).length; }
@@ -35,7 +44,9 @@ export class PhotoQueue {
       if (!file || !Number.isFinite(file.size) || file.size <= 0) error = new PhotoError('请选择非空的照片文件。', 400, 'INVALID');
       else if (file.size > MAX_BYTES) error = new PhotoError('每张照片不能超过 20 MB。', 413, 'INVALID');
       if (error) { errors.push({ file, error }); continue; }
-      const item = { id: String(this.#nextId++), file, caption: '', status: 'pending', error: '',
+      const sequence = this.#nextId++, uploadId = this.#randomUUID();
+      const nameBase = createNameBase({ id: uploadId, sequence, date: this.#now() });
+      const item = { id: String(sequence), uploadId, sequence, nameBase, fileName: previewFileName(nameBase, file.name), file, caption: '', status: 'pending', error: '',
         prepared: null, owner: null, receipt: null, uncertain: false };
       this.items.push(item); added.push(item);
     }
@@ -90,9 +101,10 @@ export class PhotoQueue {
           item.status = 'preparing'; item.error = ''; changed();
           if (!current()) return { stale: true };
           try {
-            const prepared = await client.prepare(item.file, item.caption);
+            const prepared = await client.prepare(item.file, item.caption, item.uploadId, { nameBase: item.nameBase });
             if (!current()) return { stale: true };
             item.prepared = prepared;
+            if (typeof prepared.record.fileName === 'string') item.fileName = prepared.record.fileName;
             item.owner = { id: client.user.id, login: client.user.login };
           } catch (failure) {
             if (!current()) return { stale: true };

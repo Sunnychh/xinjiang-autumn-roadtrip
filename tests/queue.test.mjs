@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PhotoQueue } from '../upload/queue.mjs';
-import { MAX_BYTES, PhotoError } from '../upload/github.mjs?v=20260929-batch';
+import { MAX_BYTES, PhotoError } from '../upload/github.mjs?v=20260929-cards';
 
 const photo = (name = '旅行.jpg', size = 100, type = '') => ({ name, size, type });
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
@@ -35,6 +35,43 @@ test('add only checks size, accepts JPG with empty/nonstandard MIME, and returns
   added[0].caption = '第一张'; assert.equal(added[1].caption, '');
   assert.equal(new Set(added.map(item => item.id)).size, 3);
   assert.ok(errors.every(entry => entry.error.code === 'INVALID'));
+});
+
+test('selection assigns stable unique names, sequences and China dates before preparation', () => {
+  let date = new Date('2026-09-28T16:30:00Z');
+  const queue = new PhotoQueue({ now: () => date });
+  const { added } = queue.add([photo('IMG_20000101.JPG'), photo('same.jpeg'), photo('unknown.data')]);
+  assert.deepEqual(added.map(item => item.sequence), [1, 2, 3]);
+  assert.equal(new Set(added.map(item => item.uploadId)).size, 3);
+  assert.equal(added[0].nameBase, `新疆旅行_20260929_001_${added[0].uploadId.slice(0, 8)}`);
+  assert.equal(added[0].fileName, `${added[0].nameBase}.jpg`);
+  assert.equal(added[1].fileName, `${added[1].nameBase}.jpg`);
+  assert.equal(added[2].fileName, added[2].nameBase, 'unknown suffix is not presented as a detected format');
+  const firstName = added[0].nameBase;
+  queue.remove(added[1].id);
+  date = new Date('2026-09-29T16:30:00Z');
+  const next = queue.add([photo('new.png')]).added[0];
+  assert.equal(next.sequence, 4, 'removal does not renumber surviving photos');
+  assert.equal(added[0].nameBase, firstName);
+  assert.match(next.nameBase, /^新疆旅行_20260930_004_/);
+});
+
+test('preparation retries reuse the selected identity and replace preview suffix with detected suffix', async () => {
+  const queue = new PhotoQueue({ now: () => new Date('2026-09-28T16:30:00Z') });
+  const { added: [item] } = queue.add([photo('actually-png.JPG')]);
+  const inputs = []; let failPreparation = true;
+  const client = fakeClient({ async prepare(file, caption, id, options) {
+    inputs.push({ id, ...options });
+    if (failPreparation) { failPreparation = false; throw fail(); }
+    return { record: { id, originalName: file.name, caption, fileName: `${options.nameBase}.png`,
+      displayName: options.nameBase, photoPath: `records/inbox/github-42/${id}/${options.nameBase}.png` } };
+  } });
+  assert.equal((await queue.run(client)).error.code, 'NETWORK');
+  assert.equal(item.fileName, `${item.nameBase}.jpg`);
+  assert.deepEqual(await queue.run(client), { complete: true });
+  assert.deepEqual(inputs, [{ id: item.uploadId, nameBase: item.nameBase }, { id: item.uploadId, nameBase: item.nameBase }]);
+  assert.equal(item.fileName, `${item.nameBase}.png`);
+  assert.equal(item.receipt.record.originalName, 'actually-png.JPG');
 });
 
 test('runs photos in order, preserves per-photo captions, and releases prepared bytes after confirmation', async () => {

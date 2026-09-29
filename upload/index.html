@@ -9,8 +9,8 @@
   <meta name="robots" content="noindex, nofollow">
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
-  <link rel="stylesheet" href="./style.css?v=20260929-batch">
-  <script src="./app.mjs?v=20260929-batch" type="module"></script>
+  <link rel="stylesheet" href="./style.css?v=20260929-cards">
+  <script src="./app.mjs?v=20260929-cards" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -18,7 +18,7 @@
     <a class="back-link" href="../"><span aria-hidden="true">←</span> 返回攻略</a>
   </header>
   <main class="upload-layout" data-screen-label="上传旅途照片">
-    <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">可一次选择多张照片，每张都能配上说明。原图依次保存到你的私有仓库。</p></div>
+    <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">可一次选择多张照片，在每张照片下方直接填写说明。原图依次保存到你的私有仓库。</p></div>
     <section class="connection-panel" aria-labelledby="connection-title">
       <div class="connection-heading"><div><p class="eyebrow">旅途留存</p><h2 id="connection-title">照片库</h2></div><span class="private-tag">保存原图</span></div>
       <div id="connected-user" class="connected-user" hidden><div><strong>可以上传照片了</strong><p>原图与附言将一起保存。</p></div></div>
@@ -47,16 +47,15 @@
           <div class="photo-actions"><button id="choose-photo" class="button secondary" type="button">从相册选择</button><button id="take-photo" class="button secondary" type="button">拍一张</button></div>
           <input id="photo-library" class="visually-hidden" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" tabindex="-1" aria-label="从相册选择照片，可多选">
           <input id="photo-camera" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" capture="environment" tabindex="-1" aria-label="拍摄一张照片">
-          <div id="photo-info" class="photo-info" hidden><span id="photo-name"></span><span id="photo-size"></span><button id="remove-photo" class="text-button" type="button">移除</button></div>
-          <p id="queue-summary" class="queue-summary" role="status" aria-live="polite"></p>
-          <ol id="photo-queue" class="photo-queue" aria-label="本次上传的照片" hidden></ol>
+          <div id="photo-info" class="photo-info" hidden><span id="photo-name"></span><span id="photo-size"></span></div>
           <p id="photo-error" class="form-status" data-state="error" role="alert"></p>
-          <p class="input-hint">JPG、PNG、WebP、HEIC / HEIF，单张不超过 20 MB。点选列表中的照片可单独填写附言。</p>
+          <p class="input-hint">JPG、PNG、WebP、HEIC / HEIF，单张不超过 20 MB。</p>
         </section>
-        <section class="caption-section" aria-labelledby="caption-title">
-          <div class="upload-section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="caption-title">给这张照片写附言 <span>选填</span></h2></div>
-          <label class="visually-hidden" for="photo-caption">照片附言，选填</label><textarea id="photo-caption" name="caption" rows="4" maxlength="4000" placeholder="记录拍摄地点、心情，或此刻想记住的事。" aria-describedby="caption-counter"></textarea>
-          <p id="caption-counter" class="caption-counter">0 / 4,000</p>
+        <section id="photo-details" class="photo-details" aria-labelledby="photo-details-title" hidden>
+          <div class="upload-section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="photo-details-title">逐张记录 <span>附言均为选填</span></h2></div>
+          <p class="input-hint naming-hint">照片按“新疆旅行_上传日期_序号_短编号”命名，保留原文件名。日期采用北京时间，不作为拍摄日期。</p>
+          <p id="queue-summary" class="queue-summary" role="status" aria-live="polite"></p>
+          <ol id="photo-queue" class="photo-queue" aria-label="本次上传的照片与附言"></ol>
         </section>
         <div id="upload-progress-wrap" class="upload-progress-wrap" hidden><div><span id="upload-progress-label">正在上传…</span><span id="upload-progress-value"></span></div><progress id="upload-progress" max="100" aria-label="照片保存步骤进度"></progress></div>
         <p id="upload-status" class="form-status" role="status" aria-live="polite"></p>

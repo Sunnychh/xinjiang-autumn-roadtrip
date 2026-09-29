@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
-import { PhotoError } from '../upload/github.mjs?v=20260929-batch';
-import { PhotoQueue } from '../upload/queue.mjs?v=20260929-batch';
+import { PhotoError } from '../upload/github.mjs?v=20260929-cards';
+import { PhotoQueue } from '../upload/queue.mjs?v=20260929-cards';
 
 // Exercise the UI with the real queue while stubbing credentials, device storage,
 // remote GitHub operations and browser APIs. No real tokens or photos are used.
@@ -25,6 +25,7 @@ async function flush() {
 class Element {
   constructor(id = '', tag = '') {
     this.id = id;
+    this.tagName = tag.match(/^<?([a-z]+)/i)?.[1]?.toUpperCase() || '';
     this.hidden = /\bhidden\b/.test(tag);
     this.disabled = /\bdisabled\b/.test(tag);
     this.checked = /\bchecked\b/.test(tag);
@@ -53,6 +54,10 @@ class Element {
   click() { if (!this.disabled) this.emit('click'); }
 }
 
+function descendants(node) {
+  return node.children.flatMap(child => [child, ...descendants(child)]);
+}
+
 function fixture(options = {}) {
   const elements = new Map();
   for (const match of html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) {
@@ -61,6 +66,21 @@ function fixture(options = {}) {
   const element = id => {
     assert.ok(elements.has(id), `The UI references missing element #${id}`);
     return elements.get(id);
+  };
+  const card = index => {
+    const row = element('photo-queue').children[index];
+    assert.ok(row, `Photo card ${index} must exist`);
+    return row;
+  };
+  const captionField = (index = element('photo-queue').children.findIndex(row => row.children[0].attributes['aria-pressed'] === 'true')) => {
+    const field = descendants(card(index)).find(node => node.tagName === 'TEXTAREA');
+    assert.ok(field, `Photo card ${index} must have its own caption field`);
+    return field;
+  };
+  const removeButton = index => {
+    const button = descendants(card(index)).find(node => String(node.className).split(/\s+/).includes('remove-card-photo'));
+    assert.ok(button, `Photo card ${index} must have its own remove button`);
+    return button;
   };
   const events = new Map(), connections = [], probes = [], storageCalls = [], forgottenListeners = [];
   let stored = options.stored ?? null, revision = 'revision-0', revisions = 0, previewCount = 0;
@@ -116,7 +136,7 @@ function fixture(options = {}) {
   });
   vm.runInContext(source, context, { filename: 'upload/app.mjs' });
   return {
-    element, connections, probes, storageCalls,
+    element, card, captionField, removeButton, connections, probes, storageCalls,
     get stored() { return stored; },
     get revision() { return revision; },
     get previewCount() { return previewCount; },
@@ -142,11 +162,13 @@ function fixture(options = {}) {
       row.children[0].click();
       await flush();
     },
-    async caption(value) {
-      element('photo-caption').value = value;
-      element('photo-caption').emit('input');
+    async caption(value, index) {
+      const field = captionField(index);
+      field.value = value;
+      field.emit('input');
       await flush();
     },
+    async removeItem(index) { removeButton(index).click(); await flush(); },
     async upload() { element('upload-form').emit('submit'); await flush(); },
     replaceFromOtherTab(token) { stored = token; revision = `revision-${++revisions}`; },
     async forgetFromOtherTab() {
@@ -162,7 +184,7 @@ function client(overrides = {}) {
     user: { id: 123, login: 'TestTraveller' }, disconnected: 0,
     disconnect() { this.disconnected++; },
     async prepare(file, caption) {
-      return { record: { id: `test-upload-${file.name}`, originalName: file.name, caption,
+      return { record: { id: `test-upload-${file.name}`, originalName: file.name, fileName: file.name, caption,
         photoPath: `records/inbox/test/${file.name}`,
         uploadedAt: '2026-09-29T12:00:00Z' } };
     },
@@ -567,6 +589,100 @@ test('multiple file picker accepts JPG MIME aliases and empty MIME metadata into
   assert.equal(f.element('upload-submit').disabled, false);
 });
 
+test('cards and receipt show normalized stored names while retaining original file names', async () => {
+  const preparedNames = [];
+  const { f } = await connected({}, {
+    async prepare(file, caption, uploadId, { nameBase }) {
+      const fileName = `${nameBase}.jpg`;
+      preparedNames.push(fileName);
+      return { record: { id: uploadId, originalName: file.name, fileName, displayName: nameBase, caption,
+        photoPath: `records/inbox/test/${uploadId}/${fileName}`, uploadedAt: '2026-09-29T12:00:00Z' } };
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  const names = [0, 1, 2].map(index => descendants(f.card(index)).find(node => node.tagName === 'STRONG').textContent);
+  assert.equal(new Set(names).size, 3);
+  names.forEach((name, index) => {
+    assert.match(name, new RegExp(`^新疆旅行_[0-9]{8}_00${index + 1}_[a-f0-9]{8}\\.jpg$`));
+    const original = descendants(f.card(index)).find(node => node.className === 'photo-original-name');
+    assert.equal(original?.textContent, `原文件：${batchPhotos()[index].name}`);
+  });
+  assert.equal(f.element('photo-name').textContent, names[0]);
+  await f.caption('第一张照片的回忆', 0);
+  await f.upload();
+  assert.deepEqual(preparedNames, names, 'Saving must keep the selected names stable');
+  assert.equal(f.element('receipt-file').textContent, names.join(' · '));
+  assert.equal(f.element('receipt-caption').textContent, `${names[0]}\n第一张照片的回忆`);
+});
+
+test('every selected photo exposes its own labelled caption field at the same time', async () => {
+  const { f } = await connected();
+  await f.selectPhoto(batchPhotos());
+  assert.doesNotMatch(html, /id="photo-caption"/, 'There must be no shared caption box');
+  const fields = [0, 1, 2].map(index => f.captionField(index));
+  assert.equal(new Set(fields.map(field => field.id)).size, 3);
+  fields.forEach((field, index) => {
+    assert.equal(f.card(index).className, 'photo-card');
+    assert.equal(field.hidden, false);
+    assert.equal(field.disabled, false);
+    assert.match(field.id, /^photo-caption-/);
+    const label = descendants(f.card(index)).find(node => node.tagName === 'LABEL');
+    assert.equal(label?.htmlFor, field.id, 'Each visible caption must have an associated label');
+  });
+});
+
+test('independent captions submit without selecting a preview and preserve focus while typing', async () => {
+  const prepared = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  const rows = [0, 1, 2].map(index => f.card(index));
+  const fields = [0, 1, 2].map(index => f.captionField(index));
+  fields[1].focus();
+  await f.caption('清晨出发', 0);
+  await f.caption('沿途的山', 1);
+  await f.caption('落日余晖', 2);
+  fields.forEach((field, index) => {
+    assert.equal(f.captionField(index), field, 'Typing must retain the same textarea node');
+    assert.equal(f.card(index), rows[index], 'Typing must not rebuild the card');
+  });
+  assert.equal(fields[1].focused, true);
+  assert.equal(f.card(0).children[0].attributes['aria-pressed'], 'true', 'Writing another caption must not require preview selection');
+  await f.upload();
+  assert.deepEqual(prepared, [
+    ['morning.jpg', '清晨出发'], ['mountain.JPG', '沿途的山'], ['sunset.jpg', '落日余晖'],
+  ]);
+  assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
+});
+
+test('removing a middle photo preserves the first and last caption identity', async () => {
+  const prepared = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('第一张说明', 0);
+  await f.caption('第二张将删除', 1);
+  await f.caption('第三张说明', 2);
+  const firstField = f.captionField(0), lastField = f.captionField(2);
+  await f.removeItem(1);
+  assert.equal(f.element('photo-queue').children.length, 2);
+  assert.equal(f.captionField(0), firstField);
+  assert.equal(f.captionField(1), lastField);
+  assert.equal(f.captionField(0).value, '第一张说明');
+  assert.equal(f.captionField(1).value, '第三张说明');
+  await f.caption('第三张补充说明', 1);
+  await f.upload();
+  assert.deepEqual(prepared, [['morning.jpg', '第一张说明'], ['sunset.jpg', '第三张补充说明']]);
+});
+
 test('each selected photo keeps its own optional caption and uploads in selection order', async () => {
   const prepared = [], saved = [], original = client();
   const { f } = await connected({}, {
@@ -579,14 +695,14 @@ test('each selected photo keeps its own optional caption and uploads in selectio
   await f.selectPhoto(batchPhotos());
   await f.caption('早晨出发');
   await f.selectItem(1);
-  assert.equal(f.element('photo-caption').value, '');
+  assert.equal(f.captionField().value, '');
   await f.caption('山路观景台');
   await f.selectItem(2);
-  assert.equal(f.element('photo-caption').value, '');
+  assert.equal(f.captionField().value, '');
   await f.selectItem(0);
-  assert.equal(f.element('photo-caption').value, '早晨出发');
+  assert.equal(f.captionField().value, '早晨出发');
   await f.selectItem(1);
-  assert.equal(f.element('photo-caption').value, '山路观景台');
+  assert.equal(f.captionField().value, '山路观景台');
   await f.upload();
   assert.deepEqual(prepared, [
     ['morning.jpg', '早晨出发'], ['mountain.JPG', '山路观景台'], ['sunset.jpg', ''],
@@ -597,7 +713,8 @@ test('each selected photo keeps its own optional caption and uploads in selectio
   assert.equal(f.element('upload-form').hidden, true);
   assert.equal(f.element('receipt-title').textContent, '3 张照片已保存');
   assert.match(f.element('receipt-file').textContent, /morning\.jpg.*mountain\.JPG.*sunset\.jpg/);
-  assert.equal(f.element('receipt-caption').hidden, true, 'A batch receipt must not attribute one caption to every photo');
+  assert.equal(f.element('receipt-caption').hidden, false);
+  assert.equal(f.element('receipt-caption').textContent, 'morning.jpg\n早晨出发\n\nmountain.JPG\n山路观景台', 'A batch receipt must attribute each caption to its own photo');
 });
 
 test('only one photo is prepared or saved at a time and progress identifies the current item', async () => {
@@ -620,7 +737,7 @@ test('only one photo is prepared or saved at a time and progress identifies the 
   assert.equal(f.element('upload-progress-wrap').hidden, false);
   assert.match(f.element('upload-progress-label').textContent, /第 1 \/ 3 张.*正在提交原图/);
   assert.equal(f.element('upload-submit').disabled, true);
-  assert.equal(f.element('photo-caption').disabled, true);
+  assert.equal(f.captionField().disabled, true);
   assert.equal(f.element('choose-photo').disabled, true);
   firstSave.resolve(receipt(firstPrepared));
   await flush();
@@ -646,8 +763,8 @@ test('an invalid image is marked in the batch while remaining photos still save'
   assert.match(f.element('queue-summary').textContent, /已保存 2 张.*未通过 1 张/);
   assert.equal(f.element('upload-receipt').hidden, true, 'The UI must not claim every photo was saved');
   await f.selectItem(1);
-  assert.equal(f.element('remove-photo').disabled, false);
-  await f.click('remove-photo');
+  assert.equal(f.removeButton(1).disabled, false);
+  await f.removeItem(1);
   assert.deepEqual(queueStates(f), ['saved', 'saved']);
   assert.equal(f.element('receipt-title').textContent, '2 张照片已保存');
   assert.equal(f.element('upload-receipt').hidden, false);
@@ -693,6 +810,46 @@ test('retry after the second photo loses network skips saved photos and preserve
   assert.deepEqual(lookups, [unresolved, unresolved]);
   assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
   assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+test('prepared captions stay locked during retry while later unprepared photos remain editable', async () => {
+  const original = client(), prepared = [], saved = [];
+  let interrupted = false, unresolved;
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+    async save(item) {
+      if (item.record.originalName === 'mountain.JPG' && !interrupted) {
+        interrupted = true; unresolved = item;
+        throw new PhotoError('offline', 0, 'NETWORK');
+      }
+      if (item.record.originalName === 'mountain.JPG') assert.equal(item, unresolved);
+      saved.push([item.record.originalName, item.record.caption]);
+      return receipt(item);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('已保存的说明', 0);
+  await f.caption('待核对的原说明', 1);
+  await f.caption('未开始的说明', 2);
+  await f.upload();
+  assert.deepEqual(queueStates(f), ['saved', 'uncertain', 'pending']);
+  assert.equal(f.captionField(0).disabled, true);
+  assert.equal(f.captionField(1).disabled, true);
+  assert.equal(f.captionField(2).disabled, false);
+  assert.equal(f.removeButton(0).disabled, true);
+  assert.equal(f.removeButton(1).disabled, true);
+  await f.caption('已保存照片不能改成此说明', 0);
+  await f.caption('待核对照片不能改成此说明', 1);
+  await f.caption('继续前补充的说明', 2);
+  await f.upload();
+  assert.deepEqual(prepared, [
+    ['morning.jpg', '已保存的说明'], ['mountain.JPG', '待核对的原说明'], ['sunset.jpg', '继续前补充的说明'],
+  ]);
+  assert.deepEqual(saved, prepared);
+  assert.deepEqual(queueStates(f), ['saved', 'saved', 'saved']);
 });
 
 for (const [code, httpStatus] of [['PERMISSION', 403], ['ACCOUNT', 409]]) {
@@ -782,7 +939,7 @@ test('a late preparation cannot overwrite a new active batch after a pagehide an
   newPrepare.resolve(await original.prepare(batchPhotos()[0], '保留这张说明'));
   await flush();
   assert.equal(newSaves, 1);
-  assert.equal(f.element('receipt-caption').textContent, '保留这张说明');
+  assert.equal(f.element('receipt-caption').textContent, 'morning.jpg\n保留这张说明');
   assert.equal(f.element('upload-receipt').hidden, false);
 });
 

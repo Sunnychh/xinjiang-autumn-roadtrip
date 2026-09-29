@@ -1,4 +1,5 @@
-import { detectImageType } from './image.mjs?v=20260929-jpeg';
+import { detectImageType } from './image.mjs?v=20260929-cards';
+import { createNameBase, validNameBase } from './naming.mjs?v=20260929-cards';
 
 export const MAX_BYTES = 20 * 1024 * 1024;
 const API = 'https://api.github.com';
@@ -154,6 +155,8 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
     if (!stored || stored.schemaVersion !== 1 || stored.id !== record.id || stored.uploader?.id !== record.uploader.id
       || stored.sha256 !== record.sha256 || stored.photoPath !== record.photoPath || stored.caption !== record.caption
       || stored.mimeType !== record.mimeType || stored.byteLength !== record.byteLength
+      || (stored.fileName !== undefined && stored.fileName !== record.fileName)
+      || (stored.displayName !== undefined && stored.displayName !== record.displayName)
       || typeof stored.originalName !== 'string' || stored.originalName.length > 255
       || typeof stored.uploadedAt !== 'string' || !Number.isFinite(Date.parse(stored.uploadedAt))) throw conflict();
     return { record: { ...record, originalName: stored.originalName, uploadedAt: stored.uploadedAt, metadataPath: `${directory}/record.json` }, commitSha, duplicate: true };
@@ -163,22 +166,26 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
     await verifyPrivate();
     return atHead(prepared, await head());
   }
-  async function prepare(file, rawCaption = '', id = crypto.randomUUID()) {
+  async function prepare(file, rawCaption = '', id = crypto.randomUUID(), options = {}) {
     ensureConnected();
     if (!file || typeof file.arrayBuffer !== 'function' || !file.size) throw invalid('请选择一张有效照片。');
     if (file.size > MAX_BYTES) throw new PhotoError('每张照片不能超过 20 MB。', 413, 'INVALID');
     if (typeof rawCaption !== 'string') throw invalid('附言必须是文字。');
     const caption = rawCaption.replace(/\r\n?/g, '\n');
     if (caption.length > 4000) throw invalid('附言不能超过 4,000 个字符。');
-    if (!UUID.test(id)) throw invalid('上传编号无效。');
+    if (typeof id !== 'string' || !UUID.test(id)) throw invalid('上传编号无效。');
     id = id.toLowerCase();
+    if (!options || typeof options !== 'object' || Array.isArray(options)) throw invalid('照片名称设置无效。');
+    const nameBase = options.nameBase === undefined ? createNameBase({ id }) : options.nameBase;
+    if (!validNameBase(nameBase, id)) throw invalid('照片名称无效，请重新选择照片。');
     const bytes = new Uint8Array(await file.arrayBuffer()), mimeType = detectImageType(bytes);
     if (!mimeType) throw new PhotoError('请选择有效的 JPG、PNG、WebP、HEIC 或 HEIF 照片。', 415, 'INVALID');
     const directory = `records/inbox/github-${user.id}/${id}`;
     const header = encoder.encode(`blob ${bytes.length}\0`), gitBytes = new Uint8Array(header.length + bytes.length);
     gitBytes.set(header); gitBytes.set(bytes, header.length);
     const [sha256, photoGitSha] = await Promise.all([digest('SHA-256', bytes), digest('SHA-1', gitBytes)]);
-    const record = Object.freeze({ schemaVersion: 1, id, photoPath: `${directory}/photo.${EXT[mimeType]}`,
+    const fileName = `${nameBase}.${EXT[mimeType]}`;
+    const record = Object.freeze({ schemaVersion: 1, id, photoPath: `${directory}/${fileName}`, fileName, displayName: nameBase,
       originalName: String(file.name || 'photo').split(/[\\/]/).at(-1).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'photo',
       mimeType, byteLength: bytes.length, sha256, caption, uploadedAt: new Date().toISOString(),
       uploader: Object.freeze({ id: `github-${user.id}`, username: user.login, provider: 'github' }), captureTime: null, location: null });

@@ -1,10 +1,12 @@
-import { PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-batch';
-import { PhotoQueue } from './queue.mjs?v=20260929-batch';
+import { PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-cards';
+import { PhotoQueue } from './queue.mjs?v=20260929-cards';
 import { loadDeviceConnection, getDeviceRevision, rememberDeviceToken, forgetDeviceToken, onDeviceForgotten } from './device-credential.mjs';
 
 const $ = id => document.getElementById(id);
 const queue = new PhotoQueue();
 const previewUrls = new Map();
+const cardNodes = new Map();
+let renderedQueueIds = [];
 let selectedId = null;
 const inputs = [$('photo-library'),$('photo-camera')];
 let client = null, connecting = false, busy = false, checkingNetwork = false, connectionGeneration = 0;
@@ -40,9 +42,7 @@ function update() {
  $('upload-submit').disabled=unavailable || busy || !queue.pending;
  $('upload-submit').textContent=busy?'正在依次保存…':hasUncertain()?'核对并继续上传':queue.pending?`保存 ${queue.pending} 张照片 ↗`:'保存照片 ↗';
  ['choose-photo','take-photo'].forEach(id=>{$(id).disabled=locked || hasUncertain();});
- $('remove-photo').disabled=locked || !item || !!item.receipt || item.uncertain || !!item.prepared;
  inputs.forEach(input=>{input.disabled=locked || hasUncertain();});
- $('photo-caption').disabled=locked || !item || !!item.prepared || !!item.receipt;
  $('upload-form').setAttribute('aria-busy',String(busy));
  $('photo-info').hidden=!item;
  $('photo-empty').hidden=!!item;
@@ -214,10 +214,8 @@ function selectItem(id) {
  selectedId=id;
  const item=selectedPhoto();
  $('preview-image').removeAttribute('src');
- $('photo-caption').value=item?.caption || '';
- $('caption-counter').textContent=($('photo-caption').value.length).toLocaleString('zh-CN')+' / 4,000';
  if(item) {
-  $('photo-name').textContent=item.file.name;
+  $('photo-name').textContent=item.fileName || item.nameBase || item.file.name;
   $('photo-size').textContent=(item.file.size/1024/1024).toLocaleString('zh-CN',{maximumFractionDigits:2})+' MB';
   $('preview-image').hidden=false; $('preview-fallback').hidden=true;
   $('preview-image').src=previewFor(item);
@@ -225,26 +223,75 @@ function selectItem(id) {
  update();
 }
 const statusLabels={pending:'待上传',preparing:'检查原图',uploading:'正在保存',saved:'已保存',invalid:'未通过校验',failed:'待重试',uncertain:'待核对'};
+function removeItem(id) {
+ if(busy || !client || connecting || deviceBusy || !queue.remove(id)) return;
+ if(previewUrls.has(id)) URL.revokeObjectURL(previewUrls.get(id));
+ previewUrls.delete(id);
+ if(selectedId===id) selectItem(queue.items.find(item=>!item.receipt)?.id || queue.items[0]?.id || null);
+ else update();
+}
+function createPhotoCard(item) {
+ const row=document.createElement('li'); row.className='photo-card';
+ const button=document.createElement('button'); button.type='button'; button.className='queue-item';
+ const thumb=document.createElement('img'); thumb.src=previewFor(item); thumb.alt=''; thumb.loading='lazy';
+ thumb.addEventListener('error',()=>{thumb.hidden=true;});
+ const details=document.createElement('span'); details.className='queue-details';
+ const name=document.createElement('strong');
+ const original=document.createElement('small'); original.className='photo-original-name';
+ original.textContent=`原文件：${item.file.name}`;
+ const state=document.createElement('span'); state.className='queue-state';
+ details.append(name,original,state); button.append(thumb,details);
+ button.addEventListener('click',()=>{if(!busy) selectItem(item.id);});
+ const editor=document.createElement('div'); editor.className='photo-card-editor';
+ const label=document.createElement('label'); label.htmlFor=`photo-caption-${item.id}`;
+ const caption=document.createElement('textarea'); caption.id=`photo-caption-${item.id}`;
+ caption.className='photo-card-caption'; caption.rows=2; caption.maxLength=4000;
+ caption.placeholder='记录这张照片的地点、心情或故事，也可以留空。';
+ const footer=document.createElement('div'); footer.className='photo-card-footer';
+ const counter=document.createElement('span'); counter.id=`caption-counter-${item.id}`; counter.className='caption-counter';
+ caption.setAttribute('aria-describedby',counter.id);
+ const remove=document.createElement('button'); remove.type='button'; remove.className='text-button remove-card-photo'; remove.textContent='移除照片';
+ remove.addEventListener('click',()=>removeItem(item.id));
+ caption.addEventListener('input',()=>{
+  if(!client || connecting || deviceBusy || busy || item.prepared || item.receipt || item.uncertain) return;
+  item.caption=caption.value;
+  counter.textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
+  state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
+ });
+ footer.append(counter,remove); editor.append(label,caption,footer); row.append(button,editor);
+ return {row,button,name,state,label,caption,counter,remove};
+}
 function renderQueue(locked) {
  const counts={saved:0,invalid:0};
  queue.items.forEach(item=>{if(item.status in counts) counts[item.status]++;});
  $('queue-summary').textContent=queue.items.length?`共 ${queue.items.length} 张 · 已保存 ${counts.saved} 张 · 待传 ${queue.pending} 张${counts.invalid?` · 未通过 ${counts.invalid} 张`:''}`:'';
- $('photo-queue').hidden=!queue.items.length;
- $('photo-queue').replaceChildren(...queue.items.map((item,index)=>{
-  const row=document.createElement('li'), button=document.createElement('button');
-  button.type='button'; button.className='queue-item'; button.disabled=locked;
-  button.setAttribute('aria-pressed',String(item.id===selectedId));
-  button.setAttribute('aria-label',`${index+1}. ${item.file.name}，${statusLabels[item.status] || '待上传'}，查看或编辑附言`);
-  button.dataset.state=item.status;
-  const thumb=document.createElement('img'); thumb.src=previewFor(item); thumb.alt=''; thumb.loading='lazy';
-  thumb.addEventListener('error',()=>{thumb.hidden=true;});
-  const details=document.createElement('span'); details.className='queue-details';
-  const name=document.createElement('strong'); name.textContent=item.file.name;
-  const state=document.createElement('span'); state.className='queue-state';
-  state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
-  details.append(name,state); button.append(thumb,details);
-  button.addEventListener('click',()=>{if(!busy) selectItem(item.id);}); row.append(button); return row;
- }));
+ $('photo-details').hidden=!queue.items.length;
+ const ids=queue.items.map(item=>item.id), rows=[];
+ for(const id of cardNodes.keys()) if(!ids.includes(id)) cardNodes.delete(id);
+ queue.items.forEach((item,index)=>{
+  if(!cardNodes.has(item.id)) cardNodes.set(item.id,createPhotoCard(item));
+  const card=cardNodes.get(item.id);
+  card.button.disabled=locked;
+  card.button.setAttribute('aria-pressed',String(item.id===selectedId));
+  card.button.setAttribute('aria-label',`预览第 ${index+1} 张照片：${item.fileName || item.nameBase || item.file.name}`);
+  card.button.dataset.state=item.status;
+  card.name.textContent=item.fileName || item.nameBase || item.file.name;
+  card.state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
+  card.label.textContent=`第 ${index+1} 张照片的附言（选填）`;
+  card.caption.disabled=locked || !!item.prepared || !!item.receipt || item.uncertain;
+  if(card.caption.value!==item.caption) card.caption.value=item.caption;
+  card.counter.textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
+  card.remove.disabled=locked || !!item.prepared || !!item.receipt || item.uncertain;
+  card.remove.setAttribute('aria-label',`移除第 ${index+1} 张照片`);
+  rows.push(card.row);
+ });
+ // Keep each editor node in place while state changes, preserving focus and
+ // the phone keyboard. Rebuild the list only when photos are added or removed.
+ if(ids.length!==renderedQueueIds.length || ids.some((id,index)=>id!==renderedQueueIds[index])) {
+  $('photo-queue').replaceChildren(...rows); renderedQueueIds=ids;
+ }
+ const selected=selectedPhoto();
+ if(selected) $('photo-name').textContent=selected.fileName || selected.nameBase || selected.file.name;
 }
 function reset() {
  if(!queue.clear()) return;
@@ -252,7 +299,6 @@ function reset() {
  previewUrls.clear(); selectedId=null;
  $('preview-image').removeAttribute('src');
  inputs.forEach(input=>{input.value='';});
- $('photo-caption').value=''; $('caption-counter').textContent='0 / 4,000';
  $('upload-progress-wrap').hidden=true;
  setStatus('photo-error',''); setStatus('upload-status',''); update();
 }
@@ -269,19 +315,6 @@ $('preview-image').addEventListener('error',()=>{if(selectedPhoto()){$('preview-
 $('choose-photo').addEventListener('click',()=>$('photo-library').click());
 $('take-photo').addEventListener('click',()=>$('photo-camera').click());
 inputs.forEach(input=>input.addEventListener('change',()=>{choose(input.files);input.value='';}));
-$('remove-photo').addEventListener('click',()=>{
- if(busy || !selectedId || !queue.remove(selectedId)) return;
- if(previewUrls.has(selectedId)) URL.revokeObjectURL(previewUrls.get(selectedId));
- previewUrls.delete(selectedId);
- selectItem(queue.items.find(item=>!item.receipt)?.id || queue.items[0]?.id || null);
- $('choose-photo').focus();
-});
-$('photo-caption').addEventListener('input',()=>{
- const item=selectedPhoto();
- if(!item || busy || item.prepared || item.receipt) return;
- item.caption=$('photo-caption').value;
- $('caption-counter').textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
-});
 $('upload-next').addEventListener('click',()=>{reset();$('choose-photo').focus();});
 function setProgress(item,{percent,label}) {
  $('upload-progress-wrap').hidden=false;
@@ -293,9 +326,9 @@ function setProgress(item,{percent,label}) {
 }
 function renderReceipt() {
  $('receipt-title').textContent=`${queue.items.length} 张照片已保存`;
- $('receipt-file').textContent=queue.items.map(item=>item.file.name).join(' · ');
+ $('receipt-file').textContent=queue.items.map(item=>item.receipt?.record.fileName || item.fileName || item.file.name).join(' · ');
  $('receipt-time').textContent='已确认原图与附言保存成功';
- const caption=queue.items.length===1?queue.items[0].caption:'';
+ const caption=queue.items.filter(item=>item.caption).map(item=>`${item.receipt?.record.fileName || item.fileName || item.file.name}\n${item.caption}`).join('\n\n');
  $('receipt-caption').textContent=caption; $('receipt-caption').hidden=!caption;
 }
 async function requireReconnect() {
