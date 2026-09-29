@@ -1,0 +1,66 @@
+name: Verify photo storage credential
+on:
+  push:
+    branches: [codex/verify-photo-token-20260929]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check private photo repository access without publishing credentials
+        env:
+          PHOTO_UPLOAD_TOKEN: ${{ secrets.PHOTO_UPLOAD_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          const token = process.env.PHOTO_UPLOAD_TOKEN?.trim();
+          const repository = '/repos/Sunnychh/xinjiang-trip-memories';
+          const testContent = 'Synthetic photo storage connectivity check; contains no user data.\n';
+          const paths = new Set(['/user', repository, repository + '/git/ref/heads/main', repository + '/git/blobs']);
+          async function request(path, method = 'GET', body) {
+            if (!paths.has(path)) throw new Error('Unexpected verification target.');
+            let response;
+            try {
+              response = await fetch('https://api.github.com' + path, {
+                method, redirect: 'error', signal: AbortSignal.timeout(20000),
+                headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json',
+                  'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'Xinjiang-Storage-Verification' },
+                body: body ? JSON.stringify(body) : undefined
+              });
+            } catch { throw new Error('GitHub API connection failed.'); }
+            if (response.status !== (method === 'POST' ? 201 : 200)) {
+              await response.body?.cancel();
+              throw new Error('GitHub API rejected verification (HTTP ' + response.status + ').');
+            }
+            try { return await response.json(); }
+            catch { throw new Error('GitHub API returned an invalid response.'); }
+          }
+          try {
+            if (!token || !/^github_pat_[A-Za-z0-9_]{20,240}$/.test(token)) {
+              throw new Error('PHOTO_UPLOAD_TOKEN is missing or is not a fine-grained token.');
+            }
+            const user = await request('/user');
+            if (user.login?.toLowerCase() !== 'sunnychh') throw new Error('Unexpected credential owner.');
+            console.log('PASS: credential identity');
+            const repo = await request(repository);
+            if (repo.private !== true || repo.full_name?.toLowerCase() !== 'sunnychh/xinjiang-trip-memories') {
+              throw new Error('The expected private photo repository is unavailable.');
+            }
+            console.log('PASS: expected repository remains private');
+            const head = await request(repository + '/git/ref/heads/main');
+            if (head.object?.type !== 'commit' || !/^[a-f0-9]{40}$/.test(head.object.sha || '')) {
+              throw new Error('Photo repository main branch is unavailable.');
+            }
+            console.log('PASS: main branch readable');
+            const blob = await request(repository + '/git/blobs', 'POST', { content: testContent, encoding: 'utf-8' });
+            const expected = createHash('sha1').update('blob ' + Buffer.byteLength(testContent) + '\0').update(testContent).digest('hex');
+            if (blob.sha !== expected) throw new Error('Synthetic write verification did not match.');
+            console.log('PASS: Contents write permission verified with an unreferenced synthetic blob');
+            console.log('No photos, branch updates, Pages deployment or credential artifact were created.');
+          } catch (error) {
+            console.error(error.message);
+            process.exitCode = 1;
+          }
+          NODE
