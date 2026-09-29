@@ -6,6 +6,7 @@ const $ = id => document.getElementById(id);
 const queue = new PhotoQueue();
 const previewUrls = new Map();
 const cardNodes = new Map();
+const batchSelected = new Set();
 let renderedQueueIds = [];
 let selectedId = null;
 const inputs = [$('photo-library'),$('photo-camera')];
@@ -14,6 +15,8 @@ let deviceBusy = false, remembered = false, storageQueue = Promise.resolve();
 let clientRevision = null, autoRestoreAllowed = true;
 const selectedPhoto = () => queue.items.find(item => item.id === selectedId);
 const hasUncertain = () => queue.uncertain;
+const canEditCaption = item => !item.prepared && !item.receipt && !item.uncertain;
+const captionControlsLocked = () => !client || connecting || deviceBusy || busy;
 
 function setStatus(id,message,state='') { $(id).textContent=message; $(id).dataset.state=state; }
 function deviceOperation(operation) {
@@ -232,6 +235,15 @@ function removeItem(id) {
 }
 function createPhotoCard(item) {
  const row=document.createElement('li'); row.className='photo-card';
+ const selectLabel=document.createElement('label'); selectLabel.className='photo-select-label';
+ const select=document.createElement('input'); select.type='checkbox'; select.id=`batch-select-${item.id}`; select.className='batch-photo-select';
+ const selectText=document.createElement('span'); selectText.textContent='选中这张照片';
+ selectLabel.append(select,selectText);
+ select.addEventListener('change',()=>{
+  if(captionControlsLocked() || !canEditCaption(item)) { update(); return; }
+  if(select.checked) batchSelected.add(item.id); else batchSelected.delete(item.id);
+  setStatus('bulk-status',''); update();
+ });
  const button=document.createElement('button'); button.type='button'; button.className='queue-item';
  const thumb=document.createElement('img'); thumb.src=previewFor(item); thumb.alt=''; thumb.loading='lazy';
  thumb.addEventListener('error',()=>{thumb.hidden=true;});
@@ -258,8 +270,8 @@ function createPhotoCard(item) {
   counter.textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
   state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
  });
- footer.append(counter,remove); editor.append(label,caption,footer); row.append(button,editor);
- return {row,button,name,state,label,caption,counter,remove};
+ footer.append(counter,remove); editor.append(label,caption,footer); row.append(selectLabel,button,editor);
+ return {row,select,button,name,state,label,caption,counter,remove};
 }
 function renderQueue(locked) {
  const counts={saved:0,invalid:0};
@@ -267,10 +279,16 @@ function renderQueue(locked) {
  $('queue-summary').textContent=queue.items.length?`共 ${queue.items.length} 张 · 已保存 ${counts.saved} 张 · 待传 ${queue.pending} 张${counts.invalid?` · 未通过 ${counts.invalid} 张`:''}`:'';
  $('photo-details').hidden=!queue.items.length;
  const ids=queue.items.map(item=>item.id), rows=[];
+ const eligibleIds=new Set(queue.items.filter(canEditCaption).map(item=>item.id));
+ for(const id of batchSelected) if(!eligibleIds.has(id)) batchSelected.delete(id);
  for(const id of cardNodes.keys()) if(!ids.includes(id)) cardNodes.delete(id);
  queue.items.forEach((item,index)=>{
   if(!cardNodes.has(item.id)) cardNodes.set(item.id,createPhotoCard(item));
   const card=cardNodes.get(item.id);
+  card.select.disabled=locked || !canEditCaption(item);
+  card.select.checked=batchSelected.has(item.id);
+  card.select.setAttribute('aria-label',`选择第 ${index+1} 张照片共用附言`);
+  card.row.dataset.batchSelected=String(card.select.checked);
   card.button.disabled=locked;
   card.button.setAttribute('aria-pressed',String(item.id===selectedId));
   card.button.setAttribute('aria-label',`预览第 ${index+1} 张照片：${item.fileName || item.nameBase || item.file.name}`);
@@ -290,13 +308,49 @@ function renderQueue(locked) {
  if(ids.length!==renderedQueueIds.length || ids.some((id,index)=>id!==renderedQueueIds[index])) {
   $('photo-queue').replaceChildren(...rows); renderedQueueIds=ids;
  }
+ updateBulkControls();
  const selected=selectedPhoto();
  if(selected) $('photo-name').textContent=selected.fileName || selected.nameBase || selected.file.name;
 }
+function updateBulkControls() {
+ const eligible=queue.items.filter(canEditCaption);
+ const selected=eligible.filter(item=>batchSelected.has(item.id));
+ const locked=captionControlsLocked(), value=$('bulk-caption').value;
+ $('bulk-selection-count').textContent=`已选 ${selected.length} / ${eligible.length} 张可编辑照片`;
+ $('bulk-select-all').disabled=locked || !eligible.length;
+ $('bulk-select-all').checked=eligible.length>0 && selected.length===eligible.length;
+ $('bulk-select-all').indeterminate=selected.length>0 && selected.length<eligible.length;
+ $('bulk-caption').disabled=locked || !eligible.length;
+ $('bulk-caption-counter').textContent=value.length.toLocaleString('zh-CN')+' / 4,000';
+ $('bulk-apply').disabled=locked || !selected.length || !value.trim() || value.length>4000;
+ $('bulk-apply').textContent=selected.length?`应用到所选 ${selected.length} 张`:'应用到所选照片';
+}
+$('bulk-select-all').addEventListener('change',()=>{
+ if(captionControlsLocked()) { update(); return; }
+ const checked=$('bulk-select-all').checked;
+ for(const item of queue.items) {
+  if(checked && canEditCaption(item)) batchSelected.add(item.id); else batchSelected.delete(item.id);
+ }
+ setStatus('bulk-status',''); update();
+});
+$('bulk-caption').addEventListener('input',()=>{
+ setStatus('bulk-status',''); updateBulkControls();
+});
+$('bulk-apply').addEventListener('click',()=>{
+ if(captionControlsLocked()) return;
+ const value=$('bulk-caption').value;
+ if(!value.trim() || value.length>4000) return;
+ const selected=queue.items.filter(item=>batchSelected.has(item.id) && canEditCaption(item));
+ if(!selected.length) return;
+ for(const item of selected) item.caption=value;
+ update();
+ setStatus('bulk-status',`已将附言填写到 ${selected.length} 张照片，可在下方逐张修改。`,'success');
+});
 function reset() {
  if(!queue.clear()) return;
  for(const url of previewUrls.values()) URL.revokeObjectURL(url);
- previewUrls.clear(); selectedId=null;
+ previewUrls.clear(); selectedId=null; batchSelected.clear();
+ $('bulk-caption').value=''; setStatus('bulk-status','');
  $('preview-image').removeAttribute('src');
  inputs.forEach(input=>{input.value='';});
  $('upload-progress-wrap').hidden=true;

@@ -9,8 +9,8 @@
   <meta name="robots" content="noindex, nofollow">
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
-  <link rel="stylesheet" href="./style.css?v=20260929-cards">
-  <script src="./app.mjs?v=20260929-cards" type="module"></script>
+  <link rel="stylesheet" href="./style.css?v=20260929-shared-caption">
+  <script src="./app.mjs?v=20260929-shared-caption" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -18,7 +18,7 @@
     <a class="back-link" href="../"><span aria-hidden="true">←</span> 返回攻略</a>
   </header>
   <main class="upload-layout" data-screen-label="上传旅途照片">
-    <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">可一次选择多张照片，在每张照片下方直接填写说明。原图依次保存到你的私有仓库。</p></div>
+    <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">可逐张填写说明，也可勾选多张照片共用一份附言。原图依次保存到你的私有仓库。</p></div>
     <section class="connection-panel" aria-labelledby="connection-title">
       <div class="connection-heading"><div><p class="eyebrow">旅途留存</p><h2 id="connection-title">照片库</h2></div><span class="private-tag">保存原图</span></div>
       <div id="connected-user" class="connected-user" hidden><div><strong>可以上传照片了</strong><p>原图与附言将一起保存。</p></div></div>
@@ -55,6 +55,16 @@
           <div class="upload-section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="photo-details-title">逐张记录 <span>附言均为选填</span></h2></div>
           <p class="input-hint naming-hint">照片按“新疆旅行_上传日期_序号_短编号”命名，保留原文件名。日期采用北京时间，不作为拍摄日期。</p>
           <p id="queue-summary" class="queue-summary" role="status" aria-live="polite"></p>
+          <div class="bulk-caption-panel" role="group" aria-labelledby="bulk-title">
+            <div class="bulk-heading"><h3 id="bulk-title">批量填写附言</h3><span id="bulk-selection-count" aria-live="polite">已选 0 张</span></div>
+            <label class="bulk-select-label" for="bulk-select-all"><input id="bulk-select-all" type="checkbox"><span>全选可编辑照片</span></label>
+            <label class="bulk-caption-label" for="bulk-caption">共用附言</label>
+            <textarea id="bulk-caption" rows="3" maxlength="4000" placeholder="例如：今天在赛里木湖，沿湖散步时拍下的风景。" aria-describedby="bulk-caption-counter bulk-caption-hint"></textarea>
+            <p id="bulk-caption-counter" class="caption-counter">0 / 4,000</p>
+            <p id="bulk-caption-hint" class="input-hint">勾选下方照片后点击应用，将替换所选照片已有附言；应用后仍可逐张修改。</p>
+            <button id="bulk-apply" class="button secondary" type="button" disabled>应用到所选照片</button>
+            <p id="bulk-status" class="form-status" role="status" aria-live="polite"></p>
+          </div>
           <ol id="photo-queue" class="photo-queue" aria-label="本次上传的照片与附言"></ol>
         </section>
         <div id="upload-progress-wrap" class="upload-progress-wrap" hidden><div><span id="upload-progress-label">正在上传…</span><span id="upload-progress-value"></span></div><progress id="upload-progress" max="100" aria-label="照片保存步骤进度"></progress></div>

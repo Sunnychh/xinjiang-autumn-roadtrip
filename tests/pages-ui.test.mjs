@@ -29,6 +29,7 @@ class Element {
     this.hidden = /\bhidden\b/.test(tag);
     this.disabled = /\bdisabled\b/.test(tag);
     this.checked = /\bchecked\b/.test(tag);
+    this.indeterminate = false;
     this.value = '';
     this.textContent = '';
     this.dataset = {};
@@ -58,6 +59,14 @@ function descendants(node) {
   return node.children.flatMap(child => [child, ...descendants(child)]);
 }
 
+function hasClass(node, className) {
+  return String(node.className || '').split(/\s+/).includes(className);
+}
+
+function previewButton(row) {
+  return descendants(row).find(node => hasClass(node, 'queue-item'));
+}
+
 function fixture(options = {}) {
   const elements = new Map();
   for (const match of html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) {
@@ -72,10 +81,15 @@ function fixture(options = {}) {
     assert.ok(row, `Photo card ${index} must exist`);
     return row;
   };
-  const captionField = (index = element('photo-queue').children.findIndex(row => row.children[0].attributes['aria-pressed'] === 'true')) => {
+  const captionField = (index = element('photo-queue').children.findIndex(row => previewButton(row)?.attributes['aria-pressed'] === 'true')) => {
     const field = descendants(card(index)).find(node => node.tagName === 'TEXTAREA');
     assert.ok(field, `Photo card ${index} must have its own caption field`);
     return field;
+  };
+  const selectCheckbox = index => {
+    const checkbox = descendants(card(index)).find(node => hasClass(node, 'batch-photo-select'));
+    assert.ok(checkbox, `Photo card ${index} must have a batch selection checkbox`);
+    return checkbox;
   };
   const removeButton = index => {
     const button = descendants(card(index)).find(node => String(node.className).split(/\s+/).includes('remove-card-photo'));
@@ -136,7 +150,7 @@ function fixture(options = {}) {
   });
   vm.runInContext(source, context, { filename: 'upload/app.mjs' });
   return {
-    element, card, captionField, removeButton, connections, probes, storageCalls,
+    element, card, captionField, selectCheckbox, removeButton, connections, probes, storageCalls,
     get stored() { return stored; },
     get revision() { return revision; },
     get previewCount() { return previewCount; },
@@ -159,7 +173,7 @@ function fixture(options = {}) {
     async selectItem(index) {
       const row = element('photo-queue').children[index];
       assert.ok(row, `Photo queue item ${index} must exist`);
-      row.children[0].click();
+      previewButton(row).click();
       await flush();
     },
     async caption(value, index) {
@@ -168,6 +182,23 @@ function fixture(options = {}) {
       field.emit('input');
       await flush();
     },
+    async toggleBulkPhoto(index, checked = true) {
+      const checkbox = selectCheckbox(index);
+      checkbox.checked = checked;
+      checkbox.emit('change');
+      await flush();
+    },
+    async selectAll(checked = true) {
+      element('bulk-select-all').checked = checked;
+      element('bulk-select-all').emit('change');
+      await flush();
+    },
+    async bulkCaption(value) {
+      element('bulk-caption').value = value;
+      element('bulk-caption').emit('input');
+      await flush();
+    },
+    async applyRaw() { element('bulk-apply').emit('click'); await flush(); },
     async removeItem(index) { removeButton(index).click(); await flush(); },
     async upload() { element('upload-form').emit('submit'); await flush(); },
     replaceFromOtherTab(token) { stored = token; revision = `revision-${++revisions}`; },
@@ -575,7 +606,7 @@ const batchPhotos = () => [
   { name: 'mountain.JPG', size: 20, type: 'image/pjpeg' },
   { name: 'sunset.jpg', size: 20, type: '' },
 ];
-const queueStates = f => f.element('photo-queue').children.map(row => row.children[0].dataset.state);
+const queueStates = f => f.element('photo-queue').children.map(row => previewButton(row).dataset.state);
 const receipt = prepared => ({ record: prepared.record, commitSha: 'b'.repeat(40) });
 
 test('multiple file picker accepts JPG MIME aliases and empty MIME metadata into the batch', async () => {
@@ -618,7 +649,7 @@ test('cards and receipt show normalized stored names while retaining original fi
 test('every selected photo exposes its own labelled caption field at the same time', async () => {
   const { f } = await connected();
   await f.selectPhoto(batchPhotos());
-  assert.doesNotMatch(html, /id="photo-caption"/, 'There must be no shared caption box');
+  assert.doesNotMatch(html, /id="photo-caption"/, 'Individual fields must not depend on the old single-photo caption box');
   const fields = [0, 1, 2].map(index => f.captionField(index));
   assert.equal(new Set(fields.map(field => field.id)).size, 3);
   fields.forEach((field, index) => {
@@ -626,7 +657,7 @@ test('every selected photo exposes its own labelled caption field at the same ti
     assert.equal(field.hidden, false);
     assert.equal(field.disabled, false);
     assert.match(field.id, /^photo-caption-/);
-    const label = descendants(f.card(index)).find(node => node.tagName === 'LABEL');
+    const label = descendants(f.card(index)).find(node => node.tagName === 'LABEL' && node.htmlFor === field.id);
     assert.equal(label?.htmlFor, field.id, 'Each visible caption must have an associated label');
   });
 });
@@ -651,7 +682,7 @@ test('independent captions submit without selecting a preview and preserve focus
     assert.equal(f.card(index), rows[index], 'Typing must not rebuild the card');
   });
   assert.equal(fields[1].focused, true);
-  assert.equal(f.card(0).children[0].attributes['aria-pressed'], 'true', 'Writing another caption must not require preview selection');
+  assert.equal(previewButton(f.card(0)).attributes['aria-pressed'], 'true', 'Writing another caption must not require preview selection');
   await f.upload();
   assert.deepEqual(prepared, [
     ['morning.jpg', '清晨出发'], ['mountain.JPG', '沿途的山'], ['sunset.jpg', '落日余晖'],
@@ -972,4 +1003,217 @@ test('late save completion and progress cannot alter a new reconciliation after 
   assert.equal(newSaves, 0, 'A confirmed existing receipt avoids saving the same photo again');
   assert.deepEqual(queueStates(f), ['saved']);
   assert.equal(f.element('upload-receipt').hidden, false);
+});
+
+const bulkSelections = f => f.element('photo-queue').children.map((_, index) => f.selectCheckbox(index).checked);
+
+test('bulk captions apply only to the chosen subset and each caption remains independently editable', async () => {
+  const prepared = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('第一张旧说明', 0);
+  await f.caption('第二张保留说明', 1);
+  await f.caption('第三张旧说明', 2);
+  const fields = [0, 1, 2].map(index => f.captionField(index));
+  assert.deepEqual(bulkSelections(f), [false, false, false], 'Adding photos must not implicitly select them for replacement');
+  assert.equal(f.element('bulk-apply').disabled, true);
+  await f.toggleBulkPhoto(0);
+  await f.toggleBulkPhoto(2);
+  await f.bulkCaption('这两张都在赛里木湖拍摄');
+  assert.equal(f.element('bulk-apply').disabled, false);
+  await f.click('bulk-apply');
+  assert.deepEqual(fields.map(field => field.value), ['这两张都在赛里木湖拍摄', '第二张保留说明', '这两张都在赛里木湖拍摄']);
+  fields.forEach((field, index) => assert.equal(f.captionField(index), field, 'Applying a shared caption must preserve the existing per-photo editor'));
+  await f.caption('赛里木湖日落，单独补充', 2);
+  await f.upload();
+  assert.deepEqual(prepared, [
+    ['morning.jpg', '这两张都在赛里木湖拍摄'],
+    ['mountain.JPG', '第二张保留说明'],
+    ['sunset.jpg', '赛里木湖日落，单独补充'],
+  ]);
+});
+
+test('bulk select-all reflects partial selection and supports clearing the selection', async () => {
+  const { f } = await connected();
+  await f.selectPhoto(batchPhotos());
+  const all = f.element('bulk-select-all');
+  assert.equal(all.checked, false);
+  assert.equal(all.indeterminate, false);
+  await f.toggleBulkPhoto(1);
+  assert.equal(all.checked, false);
+  assert.equal(all.indeterminate, true);
+  await f.selectAll();
+  assert.deepEqual(bulkSelections(f), [true, true, true]);
+  assert.equal(all.checked, true);
+  assert.equal(all.indeterminate, false);
+  await f.toggleBulkPhoto(0, false);
+  assert.equal(all.checked, false);
+  assert.equal(all.indeterminate, true);
+  await f.selectAll(false);
+  assert.deepEqual(bulkSelections(f), [false, false, false]);
+  assert.equal(all.checked, false);
+  assert.equal(all.indeterminate, false);
+  assert.equal(f.element('bulk-apply').disabled, true);
+});
+
+test('a shared caption with no selected photos cannot change any caption, even via a dispatched click', async () => {
+  const { f } = await connected();
+  await f.selectPhoto(batchPhotos());
+  await f.caption('保留第一张', 0);
+  await f.bulkCaption('没有选照片不能应用');
+  assert.equal(f.element('bulk-apply').disabled, true);
+  await f.applyRaw();
+  assert.deepEqual([0, 1, 2].map(index => f.captionField(index).value), ['保留第一张', '', '']);
+  assert.deepEqual(bulkSelections(f), [false, false, false]);
+});
+
+test('bulk selection remains attached to photo identities after a middle removal and an appended photo', async () => {
+  const prepared = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('清晨原说明', 0);
+  await f.toggleBulkPhoto(1);
+  await f.toggleBulkPhoto(2);
+  const retainedCheckbox = f.selectCheckbox(2);
+  await f.removeItem(1);
+  assert.equal(f.selectCheckbox(1), retainedCheckbox);
+  assert.deepEqual(bulkSelections(f), [false, true]);
+  await f.selectPhoto([{ name: 'new.jpg', size: 20, type: 'image/jpeg' }]);
+  assert.deepEqual(bulkSelections(f), [false, true, false], 'Appending a photo must not inherit a removed photo selection or existing select-all state');
+  await f.bulkCaption('仅原来的日落照片');
+  await f.click('bulk-apply');
+  await f.upload();
+  assert.deepEqual(prepared, [['morning.jpg', '清晨原说明'], ['sunset.jpg', '仅原来的日落照片'], ['new.jpg', '']]);
+});
+
+test('bulk select-all excludes saved and prepared uncertain photos while allowing remaining captions', async () => {
+  const prepared = [], saved = [], original = client();
+  let interrupted = false;
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+    async save(item) {
+      if (item.record.originalName === 'mountain.JPG' && !interrupted) {
+        interrupted = true;
+        throw new PhotoError('offline', 0, 'NETWORK');
+      }
+      saved.push([item.record.originalName, item.record.caption]);
+      return receipt(item);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('已保存原说明', 0);
+  await f.caption('待核对原说明', 1);
+  await f.caption('尚未上传原说明', 2);
+  await f.selectAll();
+  await f.upload();
+  assert.deepEqual(queueStates(f), ['saved', 'uncertain', 'pending']);
+  assert.deepEqual(bulkSelections(f), [false, false, true], 'Preparing a photo must remove it from future bulk caption changes');
+  assert.equal(f.selectCheckbox(0).disabled, true);
+  assert.equal(f.selectCheckbox(1).disabled, true);
+  assert.equal(f.selectCheckbox(2).disabled, false);
+  await f.selectAll(false);
+  await f.selectAll();
+  assert.deepEqual(bulkSelections(f), [false, false, true]);
+  await f.bulkCaption('待上传照片的补充');
+  await f.click('bulk-apply');
+  assert.deepEqual([0, 1, 2].map(index => f.captionField(index).value), ['已保存原说明', '待核对原说明', '待上传照片的补充']);
+  await f.upload();
+  assert.deepEqual(prepared, [['morning.jpg', '已保存原说明'], ['mountain.JPG', '待核对原说明'], ['sunset.jpg', '待上传照片的补充']]);
+  assert.deepEqual(saved, prepared);
+});
+
+test('bulk caption controls and handlers cannot edit queued photos during an active upload', async () => {
+  const saving = deferred(), prepared = [], original = client();
+  let firstPrepared;
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+    async save(item) {
+      if (!firstPrepared) { firstPrepared = item; return saving.promise; }
+      return receipt(item);
+    },
+  });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('上传前说明', 2);
+  await f.selectAll();
+  await f.bulkCaption('上传途中不得替换');
+  await f.upload();
+  assert.equal(f.element('bulk-apply').disabled, true);
+  assert.equal(f.element('bulk-caption').disabled, true);
+  assert.equal(f.element('bulk-select-all').disabled, true);
+  assert.equal(f.selectCheckbox(2).disabled, true);
+  await f.applyRaw();
+  saving.resolve(receipt(firstPrepared));
+  await flush();
+  assert.deepEqual(prepared, [['morning.jpg', ''], ['mountain.JPG', ''], ['sunset.jpg', '上传前说明']]);
+});
+
+test('bulk caption application stays guarded without a connection, during reconnect and during device deletion', async () => {
+  const deletion = deferred();
+  const { f } = await connected({ stored: TEST_TOKEN, forget: () => deletion.promise });
+  await f.selectPhoto(batchPhotos());
+  await f.caption('连接操作期间保留', 2);
+  await f.selectAll();
+  await f.bulkCaption('连接操作期间不得应用');
+  await f.event('pagehide');
+  assert.equal(f.element('bulk-apply').disabled, true);
+  await f.applyRaw();
+  assert.equal(f.captionField(2).value, '连接操作期间保留');
+  await f.event('pageshow', { persisted: true });
+  assert.equal(f.connections.length, 2);
+  assert.equal(f.element('bulk-apply').disabled, true);
+  await f.applyRaw();
+  assert.equal(f.captionField(2).value, '连接操作期间保留');
+  f.connections[1].resolve(client());
+  await flush();
+  assert.equal(f.element('bulk-apply').disabled, false);
+  await f.click('forget-device');
+  assert.equal(f.element('bulk-apply').disabled, true);
+  await f.applyRaw();
+  assert.equal(f.captionField(2).value, '连接操作期间保留');
+  deletion.resolve();
+  await flush();
+});
+
+test('bulk caption validation rejects blank and overlong values but preserves an accepted 4000-character caption verbatim', async () => {
+  const prepared = [], original = client();
+  const { f } = await connected({}, {
+    async prepare(file, caption) {
+      prepared.push([file.name, caption]);
+      return original.prepare(file, caption);
+    },
+  });
+  assert.match(html.match(/<textarea[^>]*id="bulk-caption"[^>]*>/)?.[0] || '', /maxlength="4000"/);
+  await f.selectPhoto(batchPhotos().slice(0, 1));
+  await f.caption('原说明');
+  await f.selectAll();
+  for (const value of ['', ' \n\t ', '长'.repeat(4001)]) {
+    await f.bulkCaption(value);
+    assert.equal(f.element('bulk-apply').disabled, true);
+    await f.applyRaw();
+    assert.equal(f.captionField().value, '原说明', 'Disabled-button guards must prevent programmatic validation bypass');
+  }
+  const accepted = ` ${'湖'.repeat(3998)} `;
+  await f.bulkCaption(accepted);
+  assert.equal(f.element('bulk-apply').disabled, false);
+  assert.match(f.element('bulk-caption-counter').textContent, /4,?000/);
+  await f.click('bulk-apply');
+  assert.equal(f.captionField().value, accepted, 'Meaningful spaces must not be stripped when copying the shared caption');
+  await f.upload();
+  assert.deepEqual(prepared, [['morning.jpg', accepted]]);
 });
