@@ -16,8 +16,36 @@ export class PhotoError extends Error {
 }
 
 const invalid = message => new PhotoError(message, 400, 'INVALID');
+const CONNECTION_STAGES = { input: '检查令牌格式', identity: '验证 GitHub 账号', repository: '检查照片仓库', branch: '读取照片库分支' };
+export function connectionErrorMessage(error) {
+  if (!(error instanceof PhotoError)) return '浏览器未能完成连接。请更新 Safari / Chrome 后重试，或使用下方按钮检测 GitHub 网络连接。';
+  const stage = CONNECTION_STAGES[error.stage];
+  const prefix = stage ? `${stage}时：` : '';
+  if (error.code === 'NETWORK') return prefix + '当前网络未能访问 GitHub API（api.github.com）。请点击下方“检测 GitHub 连接”，也可切换 Wi-Fi / 移动网络后重试。';
+  if (error.code === 'TIMEOUT') return prefix + '等待 GitHub 响应超时。请切换网络后重试，不需要重新创建令牌。';
+  if (error.code === 'RESPONSE') return prefix + 'GitHub 的响应未完整读取。请检查网络后重试；持续出现时请更新浏览器。';
+  if (error.code === 'AUTH') return 'GitHub 拒绝了此令牌（401）。请从生成结果复制完整令牌，不要复制“Xinjiang Photos”这个名称，并确认令牌未过期。';
+  if (['INVALID', 'PERMISSION', 'PRIVATE', 'CONFIG', 'ACCOUNT', 'CONFLICT', 'COMPAT'].includes(error.code)) return prefix + error.message;
+  return prefix + `GitHub 暂未完成请求${error.status ? `（HTTP ${error.status}）` : ''}，请稍后重试。`;
+}
+
+export async function probeGitHub({ fetchImpl = globalThis.fetch } = {}) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    let response;
+    try {
+      response = await fetchImpl(`${API}/meta`, { credentials: 'omit', redirect: 'error', cache: 'no-store',
+        referrerPolicy: 'no-referrer', signal: controller.signal,
+        headers: { Accept: 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' } });
+    } catch (error) { throw new PhotoError('无法连接 GitHub API。', 0, controller.signal.aborted || error?.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK'); }
+    await response.body?.cancel();
+    if (!response.ok) throw new PhotoError(`GitHub 已响应，但网络检测接口返回 HTTP ${response.status}；请稍后重试。`, response.status, 'PERMISSION');
+    return { reachable: true };
+  } finally { clearTimeout(timer); }
+}
+
 function sha(value) {
-  if (!/^[a-f0-9]{40}$/.test(value || '')) throw new PhotoError('照片库返回了无效的版本信息。', 502);
+  if (!/^[a-f0-9]{40}$/.test(value || '')) throw new PhotoError('照片库返回了无效的版本信息。', 502, 'RESPONSE');
   return value;
 }
 async function digest(kind, bytes) {
@@ -30,7 +58,7 @@ function base64(bytes) {
   return parts.join('');
 }
 async function json(response) {
-  if (!response.body) throw new PhotoError('照片库暂未返回有效结果。', 502);
+  if (!response.body || typeof response.body.getReader !== 'function') throw new PhotoError('照片库暂未返回有效结果。', 502, 'RESPONSE');
   const reader = response.body.getReader(), chunks = [];
   let total = 0;
   try {
@@ -38,22 +66,29 @@ async function json(response) {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > 1024 * 1024) { await reader.cancel(); throw new PhotoError('照片库返回内容过大。', 502); }
+      if (total > 1024 * 1024) { await reader.cancel(); throw new PhotoError('照片库返回内容过大。', 502, 'RESPONSE'); }
       chunks.push(value);
     }
+  } catch (error) {
+    if (error instanceof PhotoError) throw error;
+    throw new PhotoError('读取 GitHub 响应时网络中断。', 502, 'RESPONSE');
   } finally { reader.releaseLock(); }
   const content = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { content.set(chunk, offset); offset += chunk.length; }
   try { return JSON.parse(new TextDecoder().decode(content)); }
-  catch { throw new PhotoError('照片库暂未返回有效结果。', 502); }
+  catch { throw new PhotoError('照片库暂未返回有效结果。', 502, 'RESPONSE'); }
 }
 
-export async function connect(rawToken, { fetchImpl = globalThis.fetch } = {}) {
+export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgress = () => {} } = {}) {
   let token = typeof rawToken === 'string' ? rawToken.trim() : '';
   rawToken = null;
-  if (!token || token.length > 1024 || /\s/.test(token)) throw invalid('请粘贴有效的 GitHub 令牌。');
+  if (!token || token.length > 1024 || /\s/.test(token)) {
+    const error = invalid('请复制完整的 GitHub 令牌，不要复制令牌名称或整段说明；内容中不能有空格、换行。');
+    error.stage = 'input'; throw error;
+  }
   let user, saving = false;
+  let stage = 'identity';
   const ensureConnected = () => { if (!token) throw new PhotoError('连接已断开，请重新连接。', 401, 'AUTH'); };
 
   async function request(path, { method = 'GET', body, allow = [] } = {}) {
@@ -71,13 +106,13 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch } = {}) {
             'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });
-      } catch { throw new PhotoError('暂时无法连接 GitHub，请检查网络后重试。'); }
+      } catch (error) { throw new PhotoError('暂时无法连接 GitHub，请检查网络后重试。', 0, controller.signal.aborted || error?.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK'); }
       if (!response.ok) {
         await response.body?.cancel();
         if (allow.includes(response.status)) return { status: response.status, data: null };
         if (response.status === 401) throw new PhotoError('令牌无效或已过期，请重新连接。', 401, 'AUTH');
         if ([403, 404].includes(response.status)) throw new PhotoError('无法访问照片库，请确认令牌已选择照片仓库并开启 Contents 读写权限；若达到 GitHub 限流，请稍后重试。', response.status, 'PERMISSION');
-        throw new PhotoError('GitHub 暂未确认保存，请保留此页并重试核对。', response.status);
+        throw new PhotoError('GitHub 暂未确认保存，请保留此页并重试核对。', response.status, 'HTTP');
       }
       return { status: response.status, data: await json(response) };
     } finally { clearTimeout(timer); }
@@ -195,11 +230,18 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch } = {}) {
     } finally { saving = false; }
   }
   try {
+    onProgress(stage);
     const { data } = await request('/user');
     if (!Number.isSafeInteger(data.id) || data.id < 1 || typeof data.login !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(data.login)) throw invalid('GitHub 账号资料无效。');
     user = Object.freeze({ id: data.id, login: data.login });
+    stage = 'repository'; onProgress(stage);
     await verifyPrivate();
+    stage = 'branch'; onProgress(stage);
     await head();
     return Object.freeze({ user, prepare, save, lookup, disconnect() { token = ''; } });
-  } catch (error) { token = ''; throw error; }
+  } catch (error) {
+    token = '';
+    if (error instanceof PhotoError) error.stage = stage;
+    throw error;
+  }
 }

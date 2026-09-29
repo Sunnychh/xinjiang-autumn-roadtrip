@@ -227,3 +227,155 @@ test('a repository made public after connect is rejected before photo bytes are 
   await assert.rejects(client.save(prepared), safeError);
   assert.equal(g.writes().length, 0);
 });
+
+const { connectionErrorMessage, probeGitHub } = await import('../upload/github.mjs');
+const STAGE_TEXT = { identity: /账号|身份/, repository: /仓库|照片库/, branch: /分支|main/i };
+
+function diagnostic(error, { stage, code, status } = {}) {
+  safeError(error);
+  if (stage) assert.equal(error.stage, stage);
+  if (code) assert.equal(error.code, code);
+  if (status !== undefined) assert.equal(error.status, status);
+  const hint = connectionErrorMessage(error);
+  assert.equal(typeof hint, 'string');
+  assert.ok(hint.length > 0);
+  assert.ok(!hint.includes(TOKEN), 'connection diagnostics must never expose the credential');
+  if (STAGE_TEXT[stage]) assert.match(hint, STAGE_TEXT[stage], 'diagnostic identifies the failed connection step');
+  return hint;
+}
+
+test('connection progress identifies each phase before its request starts', async () => {
+  const stages = [];
+  const expected = new Map([['/user', 'identity'], ['', 'repository'], ['/git/ref/heads/main', 'branch']]);
+  const g = graph({ before({ path }) { assert.equal(stages.at(-1), expected.get(path)); } });
+  const client = await connect(TOKEN, { fetchImpl: g.fetchImpl, onProgress: stage => stages.push(stage) });
+  assert.deepEqual(stages, ['identity', 'repository', 'branch']);
+  assert.deepEqual(client.user, USER);
+  client.disconnect();
+});
+
+test('connection network failures retain their phase and give a safe GitHub API network hint', async t => {
+  for (const [path, stage] of [['/user', 'identity'], ['', 'repository'], ['/git/ref/heads/main', 'branch']]) {
+    await t.test(stage, async () => {
+      const g = graph({ before(call) { if (call.path === path) throw new TypeError(`fetch failed with credential ${TOKEN}`); } });
+      await assert.rejects(g.connect(), error => {
+        const hint = diagnostic(error, { stage, code: 'NETWORK', status: 0 });
+        assert.match(hint, /网络/);
+        assert.match(hint, /GitHub\s*API|api\.github\.com/i);
+        assert.ok(!hint.includes('fetch failed with credential'));
+        return true;
+      });
+      assert.equal(g.calls.at(-1).path, path, 'connection does not continue to later checks after failure');
+    });
+  }
+});
+
+test('an aborted connection is a timeout, distinct from permission or invalid token errors', async () => {
+  const g = graph({ before({ path }) {
+    if (path === '') throw new DOMException(`request aborted ${TOKEN}`, 'AbortError');
+  } });
+  await assert.rejects(g.connect(), error => {
+    const hint = diagnostic(error, { stage: 'repository', code: 'TIMEOUT', status: 0 });
+    assert.match(hint, /超时/);
+    return true;
+  });
+});
+
+test('invalid JSON and broken response streams are safe RESPONSE diagnostics at the failing phase', async t => {
+  for (const kind of ['invalid-json', 'broken-stream']) await t.test(kind, async () => {
+    const g = graph({ before({ path }) {
+      if (path !== '/git/ref/heads/main') return;
+      if (kind === 'invalid-json') return new Response(`{invalid ${TOKEN}`, { status: 200 });
+      return new Response(new ReadableStream({ start(controller) {
+        controller.error(new TypeError(`raw response failed ${TOKEN}`));
+      } }), { status: 200 });
+    } });
+    await assert.rejects(g.connect(), error => {
+      const hint = diagnostic(error, { stage: 'branch', code: 'RESPONSE' });
+      assert.ok(!hint.includes('raw response failed'));
+      return true;
+    });
+  });
+});
+
+test('invalid pasted token names are diagnosed before network access without echoing the input', async () => {
+  const copiedName = 'Xinjiang Trip Memories';
+  let calls = 0;
+  await assert.rejects(connect(copiedName, { fetchImpl: async () => { calls++; throw new Error('should not fetch'); } }), error => {
+    const hint = diagnostic(error, { stage: 'input', code: 'INVALID', status: 400 });
+    assert.match(hint, /令牌/);
+    assert.ok(!hint.includes(copiedName), 'a copied token name is not repeated in the error');
+    return true;
+  });
+  assert.equal(calls, 0);
+});
+
+test('unknown connection exceptions show a fallback hint instead of their raw message', () => {
+  for (const error of [new Error(`sensitive details ${TOKEN}`), { message: `sensitive details ${TOKEN}` }, null, undefined]) {
+    const hint = connectionErrorMessage(error);
+    assert.equal(typeof hint, 'string');
+    assert.ok(hint.length > 0);
+    assert.ok(!hint.includes(TOKEN) && !hint.includes('sensitive details'));
+  }
+});
+
+test('network probe uses only GitHub meta without credentials and does not establish token permissions', async () => {
+  const calls = [];
+  const result = await probeGitHub({ fetchImpl: async (input, init) => {
+    calls.push(String(input));
+    assert.equal(String(input), 'https://api.github.com/meta');
+    assert.equal(init.credentials, 'omit');
+    assert.equal(init.redirect, 'error');
+    assert.equal(new Headers(init.headers).has('Authorization'), false);
+    return reply({ verifiable_password_authentication: true });
+  } });
+  assert.deepEqual(result, { reachable: true }, 'network reachability is the only promised result');
+  assert.deepEqual(calls, ['https://api.github.com/meta']);
+  const g = graph(); g.push = false;
+  await assert.rejects(g.connect(), error => {
+    diagnostic(error, { stage: 'repository', code: 'PERMISSION', status: 403 });
+    return true;
+  });
+});
+
+test('probe network rejection, timeout and redirects are errors, never successful reachability', async t => {
+  for (const kind of ['network', 'timeout', 'redirect']) await t.test(kind, async () => {
+    let calls = 0;
+    await assert.rejects(probeGitHub({ fetchImpl: async (input, init) => {
+      calls++;
+      assert.equal(String(input), 'https://api.github.com/meta');
+      assert.equal(new Headers(init.headers).has('Authorization'), false);
+      assert.equal(init.redirect, 'error');
+      if (kind === 'network') throw new TypeError(`network ${TOKEN}`);
+      if (kind === 'timeout') throw new DOMException(`aborted ${TOKEN}`, 'AbortError');
+      return new Response(null, { status: 302, headers: { Location: 'https://untrusted.example.test' } });
+    } }), error => {
+      safeError(error);
+      if (kind === 'network') assert.equal(error.code, 'NETWORK');
+      if (kind === 'timeout') assert.equal(error.code, 'TIMEOUT');
+      assert.ok(!connectionErrorMessage(error).includes(TOKEN));
+      return true;
+    });
+    assert.equal(calls, 1, 'probe neither retries nor follows an upstream redirect');
+  });
+});
+
+test('actual connection and probe deadlines abort the pending fetch and report TIMEOUT', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const operation of ['connect', 'probe']) {
+    let signal;
+    const fetchImpl = async (_input, init) => {
+      signal = init.signal;
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    };
+    const rejected = assert.rejects(operation === 'connect'
+      ? connect(TOKEN, { fetchImpl }) : probeGitHub({ fetchImpl }), error => {
+      diagnostic(error, { stage: operation === 'connect' ? 'identity' : undefined, code: 'TIMEOUT', status: 0 });
+      return true;
+    });
+    assert.equal(signal.aborted, false);
+    t.mock.timers.tick(30000);
+    await rejected;
+    assert.equal(signal.aborted, true);
+  }
+});

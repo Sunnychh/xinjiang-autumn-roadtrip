@@ -1,10 +1,10 @@
-import { MAX_BYTES, PhotoError, connect } from './github.mjs';
+import { MAX_BYTES, PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-connection';
 
 const $ = id => document.getElementById(id);
 const acceptedTypes = ['image/jpeg','image/png','image/webp','image/heic','image/heif'];
 const extensions = {jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
 const inputs = [$('photo-library'),$('photo-camera')];
-let client = null, connecting = false, busy = false, connectionGeneration = 0;
+let client = null, connecting = false, busy = false, checkingNetwork = false, connectionGeneration = 0;
 let photo = null, previewUrl = null, prepared = null, preparedOwner = null;
 let uncertain = false, receipt = null;
 
@@ -17,6 +17,8 @@ function update() {
  $('connect-button').disabled=connecting || busy;
  $('connect-button').textContent=connecting?'正在连接…':'连接照片库';
  $('disconnect').disabled=busy || connecting;
+ $('network-check').disabled=busy || connecting || checkingNetwork;
+ $('network-check').textContent=checkingNetwork?'正在检测…':'检测 GitHub 连接（不需要令牌）';
  $('upload-fields').disabled=!client;
  $('upload-submit').disabled=!client || !photo || busy || !!receipt;
  $('upload-submit').textContent=busy?'正在保存…':uncertain?'重新核对并上传':'保存这张照片 ↗';
@@ -33,12 +35,17 @@ function update() {
 function disconnectClient() { connectionGeneration++; if(client) client.disconnect(); client=null; $('github-token').value=''; }
 function authenticationError(error) { return error?.status===401 || error?.code==='AUTH' || error?.code==='AUTH_REQUIRED'; }
 function connectionError(error) {
- if(error instanceof PhotoError && ['PRIVATE','CONFIG','ACCOUNT','CONFLICT','PERMISSION'].includes(error.code)) return error.message;
- if(authenticationError(error)) return '令牌无效或已过期，请检查后重新连接。';
- if(error?.status===403) return '暂时没有访问权限。请核对照片库 Contents 读写权限；若 GitHub 限流，请稍后重试。';
- if(error?.status===404) return '无法访问指定照片库，请确认令牌已选择该私有仓库。';
- return '连接未完成，请检查网络、令牌及仓库权限后重试。';
+ return connectionErrorMessage(error);
 }
+$('network-check').addEventListener('click',async()=>{
+ if(checkingNetwork || busy || connecting) return;
+ checkingNetwork=true; setStatus('network-status','正在检查当前设备能否连接 GitHub API…'); update();
+ try {
+  await probeGitHub();
+  setStatus('network-status','当前设备可以连接 GitHub API。接下来粘贴令牌验证账号和照片库权限。','success');
+ } catch(error) { setStatus('network-status',connectionError(error),'error'); }
+ finally { checkingNetwork=false; update(); }
+});
 $('connect-form').addEventListener('submit',async event=>{
  event.preventDefault();
  if(connecting || busy || client) return;
@@ -48,7 +55,11 @@ $('connect-form').addEventListener('submit',async event=>{
  const generation=++connectionGeneration;
  connecting=true; setStatus('connection-status','正在核对账号和私有仓库…'); update();
  try {
-  const connection=connect(token); token='';
+  const connection=connect(token,{onProgress(stage){
+   if(generation!==connectionGeneration) return;
+   const labels={identity:'1/3 · 正在验证 GitHub 账号…',repository:'2/3 · 正在检查私有照片仓库…',branch:'3/3 · 正在读取照片库分支…'};
+   setStatus('connection-status',labels[stage] || '正在连接…');
+  }}); token='';
   const next=await connection;
   if(generation!==connectionGeneration) { next.disconnect(); return; }
   if(preparedOwner && uncertain && String(next.user.id)!==String(preparedOwner.id)) {

@@ -54,7 +54,8 @@ async function checkService() {
   $('service-retry').hidden=configured;
  } catch(error) {
   if(error.status===401) needLogin();
-  else setStatus('service-status','暂时无法连接照片存储，请稍后重新连接。','error');
+  else setStatus('service-status',error instanceof ApiError && typeof error.body?.error==='string'
+   ? error.body.error : '暂时无法连接照片存储，请稍后重新连接。','error');
   $('service-retry').hidden=false;
  } finally { checking=false; update(); }
 }

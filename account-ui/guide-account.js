@@ -3,13 +3,19 @@
   link.className = 'trip-account-link';
   link.href = '/account';
   link.textContent = '我的账户';
-  const upload = document.createElement('a');
-  upload.className = 'trip-account-link';
-  upload.href = '/upload';
-  upload.textContent = '上传照片';
   const actions = document.createElement('div');
   actions.className = 'trip-account-actions';
-  actions.append(upload, link);
+  const existingUpload = document.querySelector('.upload-nav-link');
+  if (existingUpload) {
+    existingUpload.setAttribute('href', '/upload');
+  } else {
+    const upload = document.createElement('a');
+    upload.className = 'trip-account-link';
+    upload.href = '/upload';
+    upload.textContent = '上传照片';
+    actions.append(upload);
+  }
+  actions.append(link);
   const header = document.querySelector('.app-header');
   if (header) header.append(actions);
   else { actions.classList.add('trip-account-floating'); document.body.append(actions); }

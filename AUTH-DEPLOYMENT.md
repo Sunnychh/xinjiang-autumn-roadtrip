@@ -1,6 +1,6 @@
 # 账号登录与后台
 
-> 2026-09-28：照片上传已选用纯 GitHub Pages 入口 [上传照片](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/)，使用浏览器内存中的 GitHub 令牌直连私有仓库，无需部署本文后端。本文保留用于原账号登录、准备清单和可选后端版上传。
+> 2026-09-29：已改选账号密码登录、后端保管 GitHub 令牌。现有 Worker 复用账号、准备清单及照片上传功能；GitHub 令牌仅配置为服务端 secret，上传者无需填写。线上部署尚待完成，当前 [GitHub Pages 入口](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/) 仍是旧版；新站验证成功后再切换链接。
 
 本次增加真实的服务端账号体系。原根目录 HTML 仍是原来的 GitHub Pages 公开路书；`npm run build` 会另外生成 `.worker-assets/`，由 Worker 检查登录状态后提供页面。只运行 GitHub Pages 不会启用这些后端功能。
 
@@ -43,7 +43,7 @@ npm run dev
 
 源码和发布记录继续放在现有 Git 仓库。Cloudflare 托管登录版网页、Worker 和 D1，浏览器同源访问，避免跨站 Cookie 问题。
 
-1. 在本机执行 `npx wrangler login`，登录你自己的 Cloudflare 账号。
+1. 登录你自己的 Cloudflare 账号，确认用于本项目的部署权限。优先使用限定目标账号、设有到期时间的部署凭据；不要将凭据写入源码。若使用 Wrangler OAuth，先核对实际申请的 Worker / D1 权限和离线访问范围。
 2. 执行 `npx wrangler d1 create xinjiang-roadtrip-auth`，把返回的 `database_id` 写到 `wrangler.jsonc` 中，替换全零占位 ID。
 3. 确定攻略访问范围：`GUIDE_ACCESS=private` 或 `public`；线上保持 `ENVIRONMENT=production`。
 4. 执行 `npm run db:remote`，然后执行 `npm run seed:remote -- --username Sunrry`，隐藏输入初始密码。

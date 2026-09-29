@@ -10,7 +10,7 @@
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
   <link rel="stylesheet" href="./style.css">
-  <script src="./app.mjs" type="module"></script>
+  <script src="./app.mjs?v=20260929-connection" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -28,6 +28,8 @@
         <p id="token-hint" class="input-hint">令牌仅在当前页面内存使用；刷新、关闭或断开后需重新粘贴，可从你的密码管理器取用。</p>
       </form>
       <p id="connection-status" class="form-status" role="status" aria-live="polite">连接后即可选择照片。</p>
+      <button id="network-check" class="text-button" type="button">检测 GitHub 连接（不需要令牌）</button>
+      <p id="network-status" class="form-status" role="status" aria-live="polite"></p>
       <details id="token-help" class="token-help"><summary>第一次使用：怎样创建令牌？</summary><ol><li>使用照片仓库所有者 <strong>Sunnychh</strong> 的账号，打开 <a href="https://github.com/settings/personal-access-tokens/new?name=Xinjiang%20Photos&amp;description=Private%20trip%20photo%20uploads&amp;target_name=Sunnychh&amp;expires_in=30&amp;contents=write" target="_blank" rel="noopener noreferrer">GitHub 的 Fine-grained token 页面 ↗</a>，设置名称和有效期。</li><li>Resource owner 选择 <strong>Sunnychh</strong>；Repository access 选择 <strong>Only select repositories</strong>，仅勾选 <strong>xinjiang-trip-memories</strong>。</li><li>Repository permissions 中，将 <strong>Contents</strong> 设为 <strong>Read and write</strong>，Metadata 保持自动提供的读取权限。</li><li>生成后复制令牌，粘贴到上方。不要把令牌写在照片附言里。</li></ol></details>
     </section>
     <section id="upload-receipt" class="upload-receipt" aria-labelledby="receipt-title" hidden>
