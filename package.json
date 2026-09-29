@@ -5,6 +5,7 @@
   "type": "module",
   "engines": { "node": ">=22.13.0" },
   "scripts": {
+    "build:pages": "node scripts/build-pages-site.mjs",
     "build": "node scripts/build-auth-site.mjs",
     "dev": "npm run build && wrangler dev --ip 127.0.0.1 --port 8787 --var ENVIRONMENT:development",
     "dev:photos": "npm run build && node scripts/dev-with-github.mjs",

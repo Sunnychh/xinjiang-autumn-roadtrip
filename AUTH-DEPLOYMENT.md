@@ -1,6 +1,6 @@
 # 账号登录与后台
 
-> 2026-09-29：已改选账号密码登录、后端保管 GitHub 令牌。现有 Worker 复用账号、准备清单及照片上传功能；GitHub 令牌仅配置为服务端 secret，上传者无需填写。线上部署尚待完成，当前 [GitHub Pages 入口](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/) 仍是旧版；新站验证成功后再切换链接。
+> 2026-09-29：用户最终选择纯 GitHub Pages、内置专用令牌、无需账号密码的上传入口，不部署 Cloudflare。本文件仅保留此前后端实现的说明；当前发布流程见 README 的“免登录照片上传”。准备清单云端勾选仍需后端，不能通过免登录上传入口启用。
 
 本次增加真实的服务端账号体系。原根目录 HTML 仍是原来的 GitHub Pages 公开路书；`npm run build` 会另外生成 `.worker-assets/`，由 Worker 检查登录状态后提供页面。只运行 GitHub Pages 不会启用这些后端功能。
 

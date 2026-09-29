@@ -56,7 +56,7 @@
 
 ## 发布
 
-静态网站，GitHub Pages从main分支根目录发布。index.html内置脚本、样式及行程数据，在线底图与照片需要联网。
+静态网站，GitHub Pages 使用 `.github/workflows/pages.yml` 从 main 分支构建并发布 `.pages-site/`。index.html 内置脚本、样式及行程数据，在线底图与照片需要联网。构建只复制静态资源白名单，后台、测试和本地数据库不作为网页发布。
 
 ## 后台与账号登录
 
@@ -64,14 +64,16 @@
 
 出发准备已整理为按日期排列的 16 组、86 项事项，可筛选待完成与已完成。登录版按账号保存每次勾选及更新时间，支持刷新恢复和多页面冲突处理；GitHub Pages 静态版可阅读清单，保存进度需使用已连接后端的登录版。
 
-## 私密照片上传（GitHub Pages）
+## 免登录照片上传（GitHub Pages）
 
 **[打开上传页](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/)**。网页由 GitHub Pages 托管，浏览器直接调用 GitHub API，原图与可选附言只进入私有仓库 `Sunnychh/xinjiang-trip-memories`，不需要 Cloudflare 或本地服务。
 
-第一次创建 fine-grained personal access token，仅选择照片仓库，开放 Contents 读写权限；以后每次打开页面粘贴令牌连接。令牌只驻留当前页面内存，不进入源码、网址、日志、Cookie、localStorage 或 sessionStorage；刷新、关闭、离开或断开后需重新连接。这里不使用攻略账号密码，GitHub 网页的登录状态也不能代替 API 令牌。
+按用户明确选择，打开网页自动连接，不需要账号、密码或粘贴令牌。管理员只需在此仓库 Actions secrets 配置 `PHOTO_UPLOAD_TOKEN`：使用有到期时间的 fine-grained token，仅选择 `Sunnychh/xinjiang-trip-memories` 并开放 Contents 读写权限。执行一次发布后，令牌写入部署网页的 `upload/credential-config.mjs`；源码中的同名文件始终是空占位。令牌过期或撤销后，更新 secret 并重新运行发布工作流。
+
+**这是公开的上传能力，不是私密访问控制。** 部署后的令牌可以被任何访问者读到，并用于读取、修改或删除指定私有仓库中的内容；仓库标记为私有不再等于照片只对两人可见。用户已明确接受这一风险。Actions secret 仅避免把令牌写进 Git 历史和日志，不会隐藏网页中的令牌；不能使用个人广权限 CLI 令牌。GitHub 也允许举报并撤销泄露令牌，此方式无法保证长期可用。
 
 一次一张，附言选填，支持 JPEG、PNG、WebP、HEIC / HEIF，最大 20 MiB。每张存入 `records/inbox/github-<GitHub账号ID>/<上传UUID>/photo.<扩展名>`，相邻 `record.json` 保存说明、原名、上传时间、哈希及上传者；拍摄时间和地点先留空，后续根据原图与说明分析。保留原始字节和原图已有 EXIF，手机选择器可能影响交付给网页的文件信息。
 
-提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。保存回执丢失时保留当前页面，再用相同编号查证或重试。刷新会丢失未完成上传的编号，不能保证刷新后重新上传不重复；成功后再上传新照片。网页公开可打开，照片目录仍只有有权限的 GitHub 账号能访问。不会自动邀请同行者或公开照片。
+提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。保存回执丢失时保留当前页面，再用相同编号查证或重试。刷新会丢失未完成上传的编号，不能保证刷新后重新上传不重复；成功后再上传新照片。所有使用者共享内置令牌的 GitHub 身份，上传记录不能据此区分两位旅行者；网页不提供照片展示列表，但公开令牌持有者可以自行读取仓库。
 
 实现位于 `upload/`，不依赖后端。原 Worker 登录版保留供未来使用；准备清单云端勾选、账号密码登录仍属于后端功能，本次仅发布照片上传入口。技术依据：[GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[API CORS](https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests)、[Git blobs](https://docs.github.com/en/rest/git/blobs)、[令牌安全](https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure)。

@@ -10,7 +10,7 @@
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
   <link rel="stylesheet" href="./style.css">
-  <script src="./app.mjs?v=20260929-connection" type="module"></script>
+  <script src="./app.mjs?v=20260929-direct" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -20,17 +20,14 @@
   <main class="upload-layout" data-screen-label="上传旅途照片">
     <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">一次一张，想说的话可以一起记下。照片保存到你的私有仓库。</p></div>
     <section class="connection-panel" aria-labelledby="connection-title">
-      <div class="connection-heading"><div><p class="eyebrow">连接私密照片库</p><h2 id="connection-title">用 GitHub 保存旅途</h2></div><span class="private-tag">仅私有仓库</span></div>
-      <div id="connected-user" class="connected-user" hidden><div><strong id="connected-login"></strong><p>xinjiang-trip-memories · 私密照片库</p></div><button id="disconnect" class="text-button" type="button">断开连接</button></div>
-      <form id="connect-form" method="post" action="#" autocomplete="off">
-        <label for="github-token">GitHub 访问令牌</label>
-        <div class="token-input-row"><input id="github-token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴仅用于照片库的令牌" required aria-describedby="token-hint"><button id="connect-button" class="button primary" type="submit">连接照片库</button></div>
-        <p id="token-hint" class="input-hint">令牌仅在当前页面内存使用；刷新、关闭或断开后需重新粘贴，可从你的密码管理器取用。</p>
+      <div class="connection-heading"><div><p class="eyebrow">旅途留存</p><h2 id="connection-title">照片库</h2></div><span class="private-tag">保存原图</span></div>
+      <div id="connected-user" class="connected-user" hidden><div><strong>可以上传照片了</strong><p>原图与附言将一起保存。</p></div></div>
+      <form id="connect-form" method="post" action="#">
+        <button id="connect-button" class="button secondary" type="submit" disabled>重试连接</button>
       </form>
-      <p id="connection-status" class="form-status" role="status" aria-live="polite">连接后即可选择照片。</p>
-      <button id="network-check" class="text-button" type="button">检测 GitHub 连接（不需要令牌）</button>
+      <p id="connection-status" class="form-status" role="status" aria-live="polite">正在准备照片库…</p>
+      <button id="network-check" class="text-button" type="button">检测网络连接</button>
       <p id="network-status" class="form-status" role="status" aria-live="polite"></p>
-      <details id="token-help" class="token-help"><summary>第一次使用：怎样创建令牌？</summary><ol><li>使用照片仓库所有者 <strong>Sunnychh</strong> 的账号，打开 <a href="https://github.com/settings/personal-access-tokens/new?name=Xinjiang%20Photos&amp;description=Private%20trip%20photo%20uploads&amp;target_name=Sunnychh&amp;expires_in=30&amp;contents=write" target="_blank" rel="noopener noreferrer">GitHub 的 Fine-grained token 页面 ↗</a>，设置名称和有效期。</li><li>Resource owner 选择 <strong>Sunnychh</strong>；Repository access 选择 <strong>Only select repositories</strong>，仅勾选 <strong>xinjiang-trip-memories</strong>。</li><li>Repository permissions 中，将 <strong>Contents</strong> 设为 <strong>Read and write</strong>，Metadata 保持自动提供的读取权限。</li><li>生成后复制令牌，粘贴到上方。不要把令牌写在照片附言里。</li></ol></details>
     </section>
     <section id="upload-receipt" class="upload-receipt" aria-labelledby="receipt-title" hidden>
       <p class="eyebrow">这一刻，已留存</p><h2 id="receipt-title" tabindex="-1">照片已保存</h2>
@@ -62,7 +59,7 @@
         <p class="upload-footnote">保留原图与照片自带的拍摄信息；是否含时间、位置取决于原照片。只会在确认保存后显示成功。保存期间不要刷新；结果未确认时请保留本页重试。</p>
       </fieldset>
     </form>
-    <noscript><p class="form-status" data-state="error">请启用 JavaScript 后连接照片库和上传照片。</p></noscript>
+    <noscript><p class="form-status" data-state="error">请启用 JavaScript 后上传照片。</p></noscript>
   </main>
   <footer class="site-footer"><span>秋日路书 · 旅途留存</span><span>一路向天山。</span></footer>
 </body>

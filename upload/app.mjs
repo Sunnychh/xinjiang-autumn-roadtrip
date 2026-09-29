@@ -1,6 +1,8 @@
 import { MAX_BYTES, PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-connection';
+import { embeddedToken } from './credential-config.mjs';
 
 const $ = id => document.getElementById(id);
+const configured = typeof embeddedToken === 'string' && embeddedToken.trim().length > 0;
 const acceptedTypes = ['image/jpeg','image/png','image/webp','image/heic','image/heif'];
 const extensions = {jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif'};
 const inputs = [$('photo-library'),$('photo-camera')];
@@ -13,18 +15,17 @@ function update() {
  const locked = busy || uncertain;
  $('connect-form').hidden=!!client;
  $('connected-user').hidden=!client;
- $('github-token').disabled=connecting || busy;
- $('connect-button').disabled=connecting || busy;
- $('connect-button').textContent=connecting?'正在连接…':'连接照片库';
- $('disconnect').disabled=busy || connecting;
+ $('connect-button').disabled=!configured || connecting || busy;
+ $('connect-button').textContent=!configured?'入口待配置':connecting?'正在连接…':'重试连接';
+ $('connect-form').setAttribute('aria-busy',String(connecting));
  $('network-check').disabled=busy || connecting || checkingNetwork;
- $('network-check').textContent=checkingNetwork?'正在检测…':'检测 GitHub 连接（不需要令牌）';
+ $('network-check').textContent=checkingNetwork?'正在检测…':'检测网络连接';
  $('upload-fields').disabled=!client;
  $('upload-submit').disabled=!client || !photo || busy || !!receipt;
  $('upload-submit').textContent=busy?'正在保存…':uncertain?'重新核对并上传':'保存这张照片 ↗';
- ['choose-photo','take-photo','remove-photo'].forEach(id=>{$(id).disabled=locked;});
- inputs.forEach(input=>{input.disabled=locked;});
- $('photo-caption').disabled=locked;
+ ['choose-photo','take-photo','remove-photo'].forEach(id=>{$(id).disabled=locked || !client;});
+ inputs.forEach(input=>{input.disabled=locked || !client;});
+ $('photo-caption').disabled=locked || !client;
  $('upload-form').setAttribute('aria-busy',String(busy));
  $('photo-info').hidden=!photo;
  $('photo-empty').hidden=!!photo;
@@ -32,55 +33,57 @@ function update() {
  $('upload-form').hidden=!!receipt;
  $('upload-receipt').hidden=!receipt;
 }
-function disconnectClient() { connectionGeneration++; if(client) client.disconnect(); client=null; $('github-token').value=''; }
+function disconnectClient() {
+ connectionGeneration++;
+ if(client) client.disconnect();
+ client=null; connecting=false; checkingNetwork=false;
+ $('upload-progress-wrap').hidden=true;
+ setStatus('network-status','');
+}
 function authenticationError(error) { return error?.status===401 || error?.code==='AUTH' || error?.code==='AUTH_REQUIRED'; }
 function connectionError(error) {
+ if(authenticationError(error)) return '照片库连接已到期，请联系管理员更新。';
+ if(error instanceof PhotoError && ['PERMISSION','ACCOUNT','PRIVATE','CONFIG','INVALID'].includes(error.code)) return '照片库暂时不可用，请稍后重试或联系管理员检查连接权限。';
+ if(error?.code==='NETWORK') return '当前无法访问照片库。请检查网络，或点击“检测网络连接”后重试。';
+ if(error?.code==='TIMEOUT') return '照片库响应超时，请稍后重试。';
  return connectionErrorMessage(error);
 }
 $('network-check').addEventListener('click',async()=>{
  if(checkingNetwork || busy || connecting) return;
+ const generation=connectionGeneration;
  checkingNetwork=true; setStatus('network-status','正在检查当前设备能否连接 GitHub API…'); update();
  try {
   await probeGitHub();
-  setStatus('network-status','当前设备可以连接 GitHub API。接下来粘贴令牌验证账号和照片库权限。','success');
- } catch(error) { setStatus('network-status',connectionError(error),'error'); }
- finally { checkingNetwork=false; update(); }
+  if(generation!==connectionGeneration) return;
+  setStatus('network-status','网络连接正常。照片库连接失败时，可以再试一次。','success');
+ } catch(error) { if(generation===connectionGeneration) setStatus('network-status',connectionError(error),'error'); }
+ finally { if(generation===connectionGeneration) { checkingNetwork=false; update(); } }
 });
-$('connect-form').addEventListener('submit',async event=>{
- event.preventDefault();
+async function connectLibrary() {
  if(connecting || busy || client) return;
- let token=$('github-token').value.trim();
- $('github-token').value='';
- if(!token) { setStatus('connection-status','请先粘贴 GitHub 访问令牌。','error'); $('github-token').focus(); return; }
+ if(!configured) { setStatus('connection-status','上传入口待配置，请稍后再来。','notice'); return; }
  const generation=++connectionGeneration;
- connecting=true; setStatus('connection-status','正在核对账号和私有仓库…'); update();
+ checkingNetwork=false;
+ setStatus('network-status','');
+ connecting=true; setStatus('connection-status','正在连接照片库…'); update();
  try {
-  const connection=connect(token,{onProgress(stage){
+  const next=await connect(embeddedToken,{onProgress(stage){
    if(generation!==connectionGeneration) return;
-   const labels={identity:'1/3 · 正在验证 GitHub 账号…',repository:'2/3 · 正在检查私有照片仓库…',branch:'3/3 · 正在读取照片库分支…'};
+   const labels={identity:'正在验证照片库连接…',repository:'正在检查照片库…',branch:'正在准备上传…'};
    setStatus('connection-status',labels[stage] || '正在连接…');
-  }}); token='';
-  const next=await connection;
+  }});
   if(generation!==connectionGeneration) { next.disconnect(); return; }
   if(preparedOwner && uncertain && String(next.user.id)!==String(preparedOwner.id)) {
    next.disconnect();
-   setStatus('connection-status',`上次上传尚未确认，请用 ${preparedOwner.login} 的令牌重新连接后核对。`,'error');
+   setStatus('connection-status','照片库账号已发生变化。上次上传尚未确认，请联系管理员恢复原照片库连接后核对。','error');
    return;
   }
   client=next;
-  $('connected-login').textContent=client.user.login;
-  $('token-help').open=false;
-  setStatus('connection-status',uncertain?'已重新连接，可继续核对上次上传。':'私密照片库已连接，可以上传。','success');
- } catch(error) { setStatus('connection-status',connectionError(error),'error'); }
- finally { token=''; connecting=false; update(); }
-});
-$('disconnect').addEventListener('click',()=>{
- if(busy || connecting) return;
- disconnectClient();
- if(!uncertain) reset();
- setStatus('connection-status',uncertain?'已断开。上次上传尚未确认，请重新连接同一账号后核对。':'已断开连接，令牌已从当前页面清除。');
- update(); $('github-token').focus();
-});
+  setStatus('connection-status',uncertain?'已重新连接，可继续核对上次上传。':'照片库已连接，可以上传。','success');
+ } catch(error) { if(generation===connectionGeneration) setStatus('connection-status',connectionError(error),'error'); }
+ finally { if(generation===connectionGeneration) { connecting=false; update(); } }
+}
+$('connect-form').addEventListener('submit',event=>{event.preventDefault();void connectLibrary();});
 function clearPreview() { if(previewUrl) URL.revokeObjectURL(previewUrl); previewUrl=null; $('preview-image').removeAttribute('src'); }
 function reset() {
  clearPreview(); photo=null; prepared=null; preparedOwner=null; uncertain=false; receipt=null;
@@ -90,7 +93,7 @@ function reset() {
  setStatus('photo-error',''); setStatus('upload-status',''); update();
 }
 function choose(file) {
- if(busy || uncertain || !file) return;
+ if(!client || busy || uncertain || !file) return;
  const extension=file.name.split('.').at(-1)?.toLowerCase();
  const inferred=extensions[extension], type=file.type?.toLowerCase();
  if(!file.size) { setStatus('photo-error','这张照片是空文件，请重新选择。','error'); return; }
@@ -133,26 +136,32 @@ function showReceipt(result) {
 }
 function requireReconnect() {
  disconnectClient();
- setStatus('connection-status','令牌已失效，请重新连接同一账号。上次上传仍可继续核对。','error');
+ busy=false;
+ setStatus('connection-status','照片库连接已到期，请联系管理员更新。上次上传仍可继续核对。','error');
+ update();
 }
 function showActionableError(error) {
  if(!(error instanceof PhotoError) || (!['PERMISSION','PRIVATE','CONFIG','ACCOUNT','CONFLICT'].includes(error.code) && error.status!==403)) return false;
  let guidance='保存结果仍未确认，请保留本页和原图。';
  if(error.code==='PERMISSION' || error.code==='ACCOUNT' || (error.status===403 && !error.code)) {
   disconnectClient();
-  guidance='请用发起上传的同一账号，重新连接已开启此照片库 Contents 读写权限的令牌，再核对这张照片。';
-  setStatus('connection-status',error.message+' '+guidance,'error');
+  busy=false;
+  guidance='请联系管理员检查照片库连接权限。恢复连接后，再核对这张照片。';
+  setStatus('connection-status',guidance,'error');
+  update();
  }
- setStatus('upload-status',error.message+' '+guidance,'error');
+ setStatus('upload-status',connectionError(error)+' '+guidance,'error');
  return true;
 }
-async function reconcile() {
+async function reconcile(uploadClient,generation) {
  setProgress({label:'正在核对照片是否已保存…'});
  try {
-  const result=await client.lookup(prepared);
+  const result=await uploadClient.lookup(prepared);
+  if(generation!==connectionGeneration) return;
   if(result) { showReceipt(result); return; }
   setStatus('upload-status','暂未找到保存回执。请点击“重新核对并上传”，会继续处理同一张照片。','notice');
  } catch(error) {
+  if(generation!==connectionGeneration) return;
   if(authenticationError(error)) requireReconnect();
   else if(showActionableError(error)) return;
   setStatus('upload-status','暂时无法确认保存结果。请保留此页，稍后重新核对并上传。','notice');
@@ -161,34 +170,44 @@ async function reconcile() {
 $('upload-form').addEventListener('submit',async event=>{
  event.preventDefault();
  if(!client || !photo || busy || receipt) return;
+ const uploadClient=client, generation=connectionGeneration;
  busy=true; setStatus('upload-status','上传期间请保持页面打开。'); update();
  try {
   if(!prepared) {
    setProgress({label:'正在检查原图…'});
    try {
-    prepared=await client.prepare(photo,$('photo-caption').value);
-    preparedOwner={id:client.user.id,login:client.user.login};
+    const nextPrepared=await uploadClient.prepare(photo,$('photo-caption').value);
+    if(generation!==connectionGeneration) return;
+    prepared=nextPrepared;
+    preparedOwner={id:uploadClient.user.id,login:uploadClient.user.login};
    } catch(error) {
+    if(generation!==connectionGeneration) return;
     if(authenticationError(error)) requireReconnect();
-    setStatus('upload-status',error instanceof PhotoError ? '照片尚未上传。'+error.message : '照片尚未上传。请检查图片格式、大小和附言，或重新选择照片后重试。','error');
+    setStatus('upload-status',error instanceof PhotoError ? '照片尚未上传。'+(error.code==='INVALID'?error.message:connectionError(error)) : '照片尚未上传。请检查图片格式、大小和附言，或重新选择照片后重试。','error');
     return;
    }
   }
   if(uncertain) {
    setProgress({label:'正在核对上次保存结果…'});
-   const result=await client.lookup(prepared);
+   const result=await uploadClient.lookup(prepared);
+   if(generation!==connectionGeneration) return;
    if(result) { showReceipt(result); return; }
   }
   uncertain=true;
-  showReceipt(await client.save(prepared,setProgress));
+  const result=await uploadClient.save(prepared,progress=>{if(generation===connectionGeneration) setProgress(progress);});
+  if(generation!==connectionGeneration) return;
+  showReceipt(result);
  } catch(error) {
+  if(generation!==connectionGeneration) return;
   uncertain=true;
   if(authenticationError(error)) {
    requireReconnect(); setStatus('upload-status','当前保存结果尚未确认。重新连接后，请继续核对这一张照片。','notice');
-  } else if(!showActionableError(error)) await reconcile();
- } finally { busy=false; $('upload-progress-wrap').hidden=true; update(); }
+  } else if(!showActionableError(error)) await reconcile(uploadClient,generation);
+ } finally { if(generation===connectionGeneration) { busy=false; $('upload-progress-wrap').hidden=true; update(); } }
 });
 window.addEventListener('beforeunload',event=>{if(busy || uncertain){event.preventDefault();event.returnValue='';}});
-window.addEventListener('pagehide',()=>{disconnectClient();});
-window.addEventListener('pageshow',event=>{if(event.persisted && !client){setStatus('connection-status',uncertain?'页面连接已清除，请重新连接同一账号后核对上次上传。':'页面连接已清除，请重新粘贴令牌连接。');update();}});
+window.addEventListener('pagehide',()=>{disconnectClient();if(busy) uncertain=true;busy=false;update();});
+window.addEventListener('pageshow',event=>{if(event.persisted && !client) void connectLibrary();});
+setStatus('connection-status',configured?'正在准备照片库…':'上传入口待配置，请稍后再来。',configured?'':'notice');
 update();
+void connectLibrary();

@@ -1,6 +1,7 @@
 node_modules/
 .wrangler/
 .worker-assets/
+.pages-site/
 .dev.vars
 .dev.vars.*
 .env
