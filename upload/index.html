@@ -10,7 +10,7 @@
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
   <link rel="stylesheet" href="./style.css">
-  <script src="./app.mjs?v=20260929-direct" type="module"></script>
+  <script src="./app.mjs?v=20260929-device" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -22,11 +22,14 @@
     <section class="connection-panel" aria-labelledby="connection-title">
       <div class="connection-heading"><div><p class="eyebrow">旅途留存</p><h2 id="connection-title">照片库</h2></div><span class="private-tag">保存原图</span></div>
       <div id="connected-user" class="connected-user" hidden><div><strong>可以上传照片了</strong><p>原图与附言将一起保存。</p></div></div>
-      <form id="connect-form" method="post" action="#">
-        <button id="connect-button" class="button secondary" type="submit" disabled>重试连接</button>
+      <form id="connect-form" method="post" action="#" autocomplete="off">
+        <label for="github-token">照片库连接密钥</label>
+        <div class="token-input-row"><input id="github-token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="1024" placeholder="首次粘贴 GitHub 访问令牌" required disabled aria-describedby="device-hint"><button id="connect-button" class="button primary" type="submit" disabled>连接照片库</button></div>
+        <label class="remember-device" for="remember-device"><input id="remember-device" type="checkbox" checked disabled><span>记住此设备</span></label>
+        <p id="device-hint" class="input-hint">首次连接成功后保存到此设备，之后打开会自动连接，无需账号密码。</p>
       </form>
       <p id="connection-status" class="form-status" role="status" aria-live="polite">正在准备照片库…</p>
-      <button id="network-check" class="text-button" type="button">检测网络连接</button>
+      <div class="connection-actions"><button id="retry-connection" class="text-button" type="button" hidden>重试已保存的连接</button><button id="network-check" class="text-button" type="button">检测网络连接</button><button id="forget-device" class="text-button" type="button" hidden>忘记此设备</button></div>
       <p id="network-status" class="form-status" role="status" aria-live="polite"></p>
     </section>
     <section id="upload-receipt" class="upload-receipt" aria-labelledby="receipt-title" hidden>
