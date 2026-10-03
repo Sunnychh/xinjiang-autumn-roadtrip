@@ -1,0 +1,5 @@
+MapLibre GL JS 5.24.0, BSD 3-Clause. Copied from the existing published itinerary bundle.
+https://github.com/maplibre/maplibre-gl-js/blob/v5.24.0/LICENSE.txt
+Chinese vector map style copied from the existing itinerary, based on VersaTiles colorful style.
+https://tiles.versatiles.org/assets/styles/colorful/style.json
+Map data attribution remains visible on the map.

@@ -1,5 +1,6 @@
 import { detectImageType } from './image.mjs?v=20260929-cards';
 import { createNameBase, validNameBase } from './naming.mjs?v=20260929-cards';
+import { validPhotoPath, validateGallery } from './gallery-data.mjs?v=20261003-memories';
 
 export const MAX_BYTES = 20 * 1024 * 1024;
 const API = 'https://api.github.com';
@@ -58,7 +59,7 @@ function base64(bytes) {
   for (let at = 0; at < bytes.length; at += 24576) parts.push(btoa(String.fromCharCode(...bytes.subarray(at, at + 24576))));
   return parts.join('');
 }
-async function json(response) {
+async function json(response, maxBytes = 1024 * 1024) {
   if (!response.body || typeof response.body.getReader !== 'function') throw new PhotoError('照片库暂未返回有效结果。', 502, 'RESPONSE');
   const reader = response.body.getReader(), chunks = [];
   let total = 0;
@@ -67,7 +68,7 @@ async function json(response) {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > 1024 * 1024) { await reader.cancel(); throw new PhotoError('照片库返回内容过大。', 502, 'RESPONSE'); }
+      if (total > maxBytes) { await reader.cancel(); throw new PhotoError('照片库返回内容过大。', 502, 'RESPONSE'); }
       chunks.push(value);
     }
   } catch (error) {
@@ -88,11 +89,11 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
     const error = invalid('请复制完整的 GitHub 令牌，不要复制令牌名称或整段说明；内容中不能有空格、换行。');
     error.stage = 'input'; throw error;
   }
-  let user, saving = false;
+  let user, saving = false, gallerySnapshot = null;
   let stage = 'identity';
   const ensureConnected = () => { if (!token) throw new PhotoError('连接已断开，请重新连接。', 401, 'AUTH'); };
 
-  async function request(path, { method = 'GET', body, allow = [] } = {}) {
+  async function request(path, { method = 'GET', body, allow = [], maxJsonBytes = 1024 * 1024 } = {}) {
     ensureConnected();
     if (path !== '/user' && path !== ROOT && !path.startsWith(`${ROOT}/`)) throw invalid('照片库路径无效。');
     const url = new URL(path, API);
@@ -108,6 +109,10 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });
       } catch (error) { throw new PhotoError('暂时无法连接 GitHub，请检查网络后重试。', 0, controller.signal.aborted || error?.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK'); }
+      if (response.redirected || (response.url && new URL(response.url).origin !== API)) {
+        await response.body?.cancel();
+        throw new PhotoError('照片库响应地址无效。', 502, 'RESPONSE');
+      }
       if (!response.ok) {
         await response.body?.cancel();
         if (allow.includes(response.status)) return { status: response.status, data: null };
@@ -115,7 +120,9 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
         if ([403, 404].includes(response.status)) throw new PhotoError('无法访问照片库，请确认令牌已选择照片仓库并开启 Contents 读写权限；若达到 GitHub 限流，请稍后重试。', response.status, 'PERMISSION');
         throw new PhotoError('GitHub 暂未确认保存，请保留此页并重试核对。', response.status, 'HTTP');
       }
-      return { status: response.status, data: await json(response) };
+      const data = await json(response, maxJsonBytes);
+      ensureConnected();
+      return { status: response.status, data };
     } finally { clearTimeout(timer); }
   }
   async function verifyPrivate() {
@@ -130,6 +137,60 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
     const { data } = await request(`${ROOT}/git/ref/heads/main`);
     if (data.object?.type !== 'commit') throw new PhotoError('照片库 main 分支尚未就绪。', 409, 'CONFIG');
     return sha(data.object.sha);
+  }
+  const badGallery = () => new PhotoError('照片回忆数据无效或不完整，请稍后重新生成。', 502, 'RESPONSE');
+  // GitHub wraps binary bytes in base64 JSON (including escaped line breaks).
+  // Keep every streaming response bounded, including envelopes for large files.
+  const blobJsonLimit = bytes => Math.ceil(bytes * 1.5) + 4096;
+  async function readGalleryFile(path, commitSha, maxBytes, { missing = false } = {}) {
+    const encoded = path.split('/').map(encodeURIComponent).join('/');
+    const { data: entry, status } = await request(`${ROOT}/contents/${encoded}?ref=${sha(commitSha)}`, {
+      allow: missing ? [404] : [], maxJsonBytes: blobJsonLimit(Math.min(maxBytes, 1024 * 1024)),
+    });
+    if (status === 404) return null;
+    if (!entry || Array.isArray(entry) || entry.type !== 'file' || entry.path !== path
+      || !Number.isSafeInteger(entry.size) || entry.size < 1 || entry.size > maxBytes) throw badGallery();
+    const expectedSha = sha(entry.sha);
+    // Never use download_url, html_url, or any URL returned in repository data.
+    const { data: blob } = await request(`${ROOT}/git/blobs/${expectedSha}`, { maxJsonBytes: blobJsonLimit(maxBytes) });
+    if (!blob || blob.sha !== expectedSha || blob.encoding !== 'base64' || blob.size !== entry.size
+      || typeof blob.content !== 'string') throw badGallery();
+    const encodedContent = blob.content.replace(/[\r\n]/g, '');
+    if (encodedContent.length !== 4 * Math.ceil(entry.size / 3) || /[^A-Za-z0-9+/=]/.test(encodedContent)) throw badGallery();
+    let bytes;
+    try { bytes = Uint8Array.from(atob(encodedContent), char => char.charCodeAt(0)); }
+    catch { throw badGallery(); }
+    if (bytes.length !== entry.size || bytes.length > maxBytes) throw badGallery();
+    const header = encoder.encode(`blob ${bytes.length}\0`), gitBytes = new Uint8Array(header.length + bytes.length);
+    gitBytes.set(header); gitBytes.set(bytes, header.length);
+    if (await digest('SHA-1', gitBytes) !== expectedSha) throw badGallery();
+    ensureConnected();
+    return bytes;
+  }
+  async function gallery() {
+    ensureConnected();
+    await verifyPrivate();
+    const snapshot = await head();
+    const bytes = await readGalleryFile('records/derived/index.json', snapshot, 8 * 1024 * 1024, { missing: true });
+    if (bytes === null) { gallerySnapshot = snapshot; return null; }
+    let result;
+    try { result = validateGallery(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))); }
+    catch { throw badGallery(); }
+    ensureConnected();
+    gallerySnapshot = snapshot;
+    return { ...result, snapshotCommit: snapshot };
+  }
+  async function photoBlob(path, { maxBytes = MAX_BYTES } = {}) {
+    ensureConnected();
+    if (!validPhotoPath(path)) throw invalid('照片路径无效。');
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) throw invalid('照片大小限制无效。');
+    await verifyPrivate();
+    const snapshot = gallerySnapshot ?? await head();
+    const bytes = await readGalleryFile(path, snapshot, maxBytes);
+    const mimeType = detectImageType(bytes);
+    if (!mimeType || (path.startsWith('records/derived/previews/') && mimeType !== 'image/jpeg')) throw badGallery();
+    ensureConnected();
+    return new Blob([bytes], { type: mimeType });
   }
   function assertPrepared(prepared) {
     ensureConnected();
@@ -245,7 +306,7 @@ export async function connect(rawToken, { fetchImpl = globalThis.fetch, onProgre
     await verifyPrivate();
     stage = 'branch'; onProgress(stage);
     await head();
-    return Object.freeze({ user, prepare, save, lookup, disconnect() { token = ''; } });
+    return Object.freeze({ user, prepare, save, lookup, gallery, photoBlob, disconnect() { token = ''; gallerySnapshot = null; } });
   } catch (error) {
     token = '';
     if (error instanceof PhotoError) error.stage = stage;

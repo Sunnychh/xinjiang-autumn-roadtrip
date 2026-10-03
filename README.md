@@ -2,7 +2,7 @@
 
 2026 年 9 月 27 日至 10 月 8 日，2 人、12 天 11 晚。9/27 12:00 抵达乌鲁木齐；10/7 14:00 前一嗨还车；10/8 06:45 起飞。
 
-[在线行程](https://sunnychh.github.io/xinjiang-autumn-roadtrip/) · [上传照片](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/) · [11晚已订住宿](https://sunnychh.github.io/xinjiang-autumn-roadtrip/#hotels)
+[在线行程](https://sunnychh.github.io/xinjiang-autumn-roadtrip/) · [上传照片](https://sunnychh.github.io/xinjiang-autumn-roadtrip/upload/) · [旅行回忆](https://sunnychh.github.io/xinjiang-autumn-roadtrip/memories/) · [11晚已订住宿](https://sunnychh.github.io/xinjiang-autumn-roadtrip/#hotels)
 
 包含每日时间线、真实道路地图与方向箭头、景点当天游玩顺序、预约入口与备用方案、11家已订住宿及公开商户照片、景点餐厅参考、驾驶图表和可调整预算。已订事实来自用户提供的订单截图；本次只整理行程，未修改任何订单。
 
@@ -78,4 +78,15 @@ GitHub Actions 中的 `PHOTO_UPLOAD_TOKEN` 仅用于隔离的权限验证，不�
 
 提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。保存回执丢失时保留当前页面，再用相同编号查证或重试。记住连接不等于保存待上传照片；刷新会丢失未完成上传的编号，不能保证刷新后重新上传不重复。若两人使用同一个 GitHub token，上传记录仍为同一个 GitHub 身份；可在附言中注明拍摄者。
 
-实现位于 `upload/`，不依赖后端。原 Worker 登录版保留供未来使用；准备清单云端勾选、账号密码登录仍属于后端功能，本次仅发布照片上传入口。技术依据：[GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[API CORS](https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests)、[Git blobs](https://docs.github.com/en/rest/git/blobs)、[令牌安全](https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure)。
+实现位于 `upload/`，不依赖后端。原 Worker 登录版保留供未来使用；准备清单云端勾选、账号密码登录仍属于后端功能，照片上传与旅行回忆均可由 Pages 提供。技术依据：[GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[API CORS](https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests)、[Git blobs](https://docs.github.com/en/rest/git/blobs)、[令牌安全](https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure)。
+
+
+## 自动整理旅行回忆
+
+**[打开旅行回忆](https://sunnychh.github.io/xinjiang-autumn-roadtrip/memories/)**，复用上传页已经保存到本浏览器的连接。首次使用先到上传页连接照片库并勾选“记住此设备”。
+
+私有照片仓库的 `Build private travel memories` GitHub Actions 工作流监听 `records/inbox/` 的新增或修改，使用 ExifTool 读取原图 GPS、拍摄时间，以 Pillow 生成缩略图，增量保存私有 `records/derived/index.json` 与 `records/derived/previews/`。不需要部署服务器或配置额外 API 密钥。批量上传期间自动排队，最新任务覆盖所有已提交照片；可在私有仓库 Actions 手动重新运行。
+
+地图复用攻略的中文矢量底图与 WGS84 计划公路路线。实拍照片以原始 GPS 标点，点击查看照片、附言和拍摄时间；同位置多图可切换。没有 GPS 的进入“待补充地点”，不会用酒店坐标或上传时间代替拍摄信息。计划线不代表实际行驶轨迹。私有 `records/overrides.json` 可补充已确认的位置与时间（格式见私有仓库 README）。
+
+页面在前台每 60 秒检查索引，也可手动刷新。图片只在点选时经 GitHub API 鉴权读取；不使用可公开访问的照片 URL，不把照片、精确 GPS、附言、索引或访问密钥写入本公开仓库。地图供应商会收到普通底图请求；照片文件与索引只向 GitHub 请求。断开连接或在其他同源标签忘记设备时，页面清除照片、标点与临时 Blob URL。

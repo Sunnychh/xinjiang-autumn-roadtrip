@@ -9,13 +9,13 @@
   <meta name="robots" content="noindex, nofollow">
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
-  <link rel="stylesheet" href="./style.css?v=20260929-shared-caption">
+  <link rel="stylesheet" href="./style.css?v=20261003-memories">
   <script src="./app.mjs?v=20260929-shared-caption" type="module"></script>
 </head>
 <body>
   <header class="app-header">
     <a class="brand" href="../" aria-label="秋日路书首页"><span class="brand-mark" aria-hidden="true">疆</span><span>秋日路书<small>XINJIANG · 2026</small></span></a>
-    <a class="back-link" href="../"><span aria-hidden="true">←</span> 返回攻略</a>
+    <nav class="header-links" aria-label="页面导航"><a class="back-link" href="../memories/">旅行回忆</a><a class="back-link" href="../"><span aria-hidden="true">←</span> 返回攻略</a></nav>
   </header>
   <main class="upload-layout" data-screen-label="上传旅途照片">
     <div class="upload-heading"><p class="eyebrow">把今天的一刻，留给以后的我们</p><h1>上传旅途照片</h1><p class="section-copy">可逐张填写说明，也可勾选多张照片共用一份附言。原图依次保存到你的私有仓库。</p></div>
@@ -35,7 +35,8 @@
     <section id="upload-receipt" class="upload-receipt" aria-labelledby="receipt-title" hidden>
       <p class="eyebrow">这一刻，已留存</p><h2 id="receipt-title" tabindex="-1">照片已保存</h2>
       <p id="receipt-file" class="receipt-file"></p><p id="receipt-time" class="input-hint"></p><p id="receipt-caption" class="receipt-caption" hidden></p>
-      <p class="section-copy">原图和附言已存入私有仓库，可用于之后整理旅行回忆。</p>
+      <p class="section-copy">原图和附言已保存，正在自动整理拍摄时间与地点。稍后可到旅行回忆查看。</p>
+      <p><a class="back-link" href="../memories/">查看旅行回忆 →</a></p>
       <button id="upload-next" class="button primary" type="button">继续添加照片 <span aria-hidden="true">＋</span></button>
     </section>
     <form id="upload-form" method="post" action="#" novalidate>
