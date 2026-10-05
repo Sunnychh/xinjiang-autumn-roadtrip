@@ -227,3 +227,21 @@ test('redirects are never followed and redirected synthetic responses are reject
   } });
   await assert.rejects((await g.connect()).gallery(), isCode('RESPONSE'));
 });
+
+
+test('duplicate fingerprints survive authenticated gallery validation while old records remain compatible', async () => {
+  const contentHash = 'a'.repeat(64), pixelHash = 'b'.repeat(64);
+  const client = await graph({ value: manifest({ photos: [photo({ contentHash, pixelHash })] }) }).connect();
+  const [item] = (await client.gallery()).photos;
+  assert.equal(item.contentHash, contentHash); assert.equal(item.pixelHash, pixelHash);
+  const legacy = await graph({ value: manifest({ photos: [photo({ contentHash: null, pixelHash: null })] }) }).connect();
+  assert.equal((await legacy.gallery()).photos[0].contentHash, null);
+});
+test('invalid duplicate fingerprints cannot become trusted grouping keys', async t => {
+  for (const value of ['bad', 'a'.repeat(63), 'A'.repeat(64), 42, {}]) {
+    for (const field of ['contentHash', 'pixelHash']) await t.test(field + String(value), async () => {
+      const client = await graph({ value: manifest({ photos: [photo({ [field]: value })] }) }).connect();
+      await assert.rejects(client.gallery(), isCode('RESPONSE'));
+    });
+  }
+});

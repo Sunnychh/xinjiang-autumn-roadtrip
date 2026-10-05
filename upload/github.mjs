@@ -1,6 +1,6 @@
 import { detectImageType } from './image.mjs?v=20260929-cards';
 import { createNameBase, validNameBase } from './naming.mjs?v=20260929-cards';
-import { validPhotoPath, validateGallery } from './gallery-data.mjs?v=20261003-memories';
+import { validPhotoPath, validateGallery } from './gallery-data.mjs?v=20261005-duplicates';
 
 export const MAX_BYTES = 20 * 1024 * 1024;
 const API = 'https://api.github.com';

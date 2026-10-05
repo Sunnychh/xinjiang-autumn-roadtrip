@@ -10,9 +10,9 @@
   <title>旅行回忆地图 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
   <link rel="stylesheet" href="./vendor/maplibre-gl.css">
-  <link rel="stylesheet" href="./style.css?v=20261003-memories">
+  <link rel="stylesheet" href="./style.css?v=20261005-duplicates">
   <script src="./vendor/maplibre-gl.js" defer></script>
-  <script src="./app.mjs?v=20261003-memories" type="module"></script>
+  <script src="./app.mjs?v=20261005-duplicates" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -22,7 +22,8 @@
   <main class="memories-layout" data-screen-label="旅行回忆地图">
     <div class="page-heading"><div><p class="eyebrow">一路风景，都有来处</p><h1>旅行回忆地图</h1><p class="section-copy">在地图上重逢拍下的那一刻。</p></div><span class="privacy-label">私密照片库</span></div>
     <section class="connection-strip" aria-label="照片库连接状态"><div><p id="connection-status" role="status" aria-live="polite">正在连接此设备上的照片库…</p><p id="index-status" class="subtle"></p></div><div class="connection-actions"><a id="connect-link" class="button secondary" href="../upload/" hidden>去连接照片库</a><button id="refresh" class="button secondary" type="button" disabled>刷新照片</button><button id="disconnect" class="text-button" type="button" hidden>关闭照片展示</button></div></section>
-    <div class="summary" aria-label="照片统计"><div><strong id="total-count">—</strong><span>张旅途照片</span></div><div><strong id="located-count">—</strong><span>张已标记位置</span></div><div><strong id="unlocated-count">—</strong><span>张待补充位置</span></div></div>
+    <div class="summary" aria-label="照片统计"><div><strong id="total-count">—</strong><span>张不同照片</span></div><div><strong id="located-count">—</strong><span>张已标记位置</span></div><div><strong id="unlocated-count">—</strong><span>张待补充位置</span></div></div>
+    <p id="duplicate-summary" class="duplicate-summary" aria-live="polite"></p>
     <section class="map-section" aria-label="路线与照片地点">
       <div class="map-toolbar"><div class="legend"><span><i class="legend-route"></i>计划参考路线</span><span><i class="legend-photo"></i>照片拍摄点</span></div><div><button id="fit-plan" type="button" class="text-button">看计划全程</button><button id="fit-photos" type="button" class="text-button" disabled>看全部照片点</button></div></div>
       <div id="memory-map" tabindex="0" aria-label="可拖动缩放的中文地图，点击照片圆点查看风景"></div>
@@ -31,7 +32,7 @@
     </section>
     <div class="memory-content">
       <section class="photo-browser" aria-labelledby="photo-list-title"><div class="section-heading"><h2 id="photo-list-title">旅途留影</h2><span id="list-count" class="subtle"></span></div><div class="filter-tabs" role="group" aria-label="照片筛选"><button type="button" data-filter="all" aria-pressed="true">全部</button><button type="button" data-filter="located" aria-pressed="false">有定位</button><button type="button" data-filter="unlocated" aria-pressed="false">待补充位置</button></div><p id="list-empty" class="empty-copy">连接照片库后，上传的照片会出现在这里。</p><ol id="photo-list" class="photo-list"></ol><button id="show-more" class="text-button" type="button" hidden>显示更多照片</button></section>
-      <section class="photo-detail" aria-labelledby="detail-title"><div id="detail-empty" class="detail-empty"><span aria-hidden="true">◎</span><h2>点开一个记忆</h2><p>选择地图圆点或左侧照片，查看风景、附言与拍摄信息。</p></div><article id="detail-content" hidden><div class="detail-heading"><p id="detail-position" class="eyebrow"></p><h2 id="detail-title" tabindex="-1"></h2></div><div class="detail-image-wrap"><img id="detail-image" alt="" hidden><p id="image-status" role="status"></p></div><div id="point-photos" class="point-photos" aria-label="此拍摄点的照片" hidden></div><p id="detail-caption" class="detail-caption"></p><dl id="detail-metadata" class="detail-metadata"></dl><button id="load-original" class="text-button" type="button" hidden>查看原图</button></article></section>
+      <section class="photo-detail" aria-labelledby="detail-title"><div id="detail-empty" class="detail-empty"><span aria-hidden="true">◎</span><h2>点开一个记忆</h2><p>选择地图圆点或左侧照片，查看风景、附言与拍摄信息。</p></div><article id="detail-content" hidden><div class="detail-heading"><p id="detail-position" class="eyebrow"></p><h2 id="detail-title" tabindex="-1"></h2></div><div class="detail-image-wrap"><img id="detail-image" alt="" hidden><p id="image-status" role="status"></p></div><section id="duplicate-section" class="duplicate-section" aria-labelledby="duplicate-title" hidden><h3 id="duplicate-title"></h3><p id="duplicate-note"></p><div id="duplicate-photos" class="duplicate-photos" aria-label="这一组相同照片"></div><button id="duplicate-more" class="text-button" type="button" hidden>显示更多组内照片</button></section><div id="point-photos" class="point-photos" aria-label="此拍摄点的照片" hidden></div><p id="detail-caption" class="detail-caption"></p><dl id="detail-metadata" class="detail-metadata"></dl><button id="load-original" class="text-button" type="button" hidden>查看原图</button></article></section>
     </div>
   </main>
   <footer class="site-footer"><span>秋日路书 · 2026</span><span>照片和定位从你的私有仓库读取</span></footer>

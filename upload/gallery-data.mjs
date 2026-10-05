@@ -1,4 +1,6 @@
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
+const CONTENT_HASH = /^[a-f0-9]{64}$/;
+const optionalHash = value => value == null || typeof value === 'string' && CONTENT_HASH.test(value);
 const HASH = /^[a-f0-9]{40}$/;
 const imageExtension = /\.(?:jpe?g|png|webp|heic|heif)$/i;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -29,6 +31,7 @@ export function validateGallery(value) {
       || !(photo.uploadedAt === null || validTime(photo.uploadedAt)) || !(photo.captureTime === null || validTime(photo.captureTime))
       || !nullableString(photo.captureTimeSource, 80) || !nullableString(photo.captureTimeOffset, 32)
       || !(photo.thumbnailPath === undefined || photo.thumbnailPath === null || validPhotoPath(photo.thumbnailPath, { thumbnail: true }))
+      || !optionalHash(photo.contentHash) || !optionalHash(photo.pixelHash)
       || !Array.isArray(photo.issues) || photo.issues.length > 50 || photo.issues.some(issue => !boundedString(issue, 500))) fail();
     const location = photo.location;
     if (location !== null && (!isObject(location) || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)
