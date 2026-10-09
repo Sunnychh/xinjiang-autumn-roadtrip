@@ -19,7 +19,7 @@ function deferred() {
 }
 
 async function flush() {
-  for (let i = 0; i < 30; i++) await Promise.resolve();
+  for (let i = 0; i < 100; i++) await Promise.resolve();
 }
 
 class Element {
@@ -96,7 +96,9 @@ function fixture(options = {}) {
     assert.ok(button, `Photo card ${index} must have its own remove button`);
     return button;
   };
-  const events = new Map(), connections = [], probes = [], storageCalls = [], forgottenListeners = [];
+  const events = new Map(), documentEvents = new Map(), connections = [], probes = [], storageCalls = [], forgottenListeners = [];
+  const pendingCalls = [], lockCalls = [];
+  let pendingBatch = options.pendingBatch ?? null;
   let stored = options.stored ?? null, revision = 'revision-0', revisions = 0, previewCount = 0;
   const window = {
     addEventListener(name, listener) {
@@ -104,8 +106,42 @@ function fixture(options = {}) {
       listeners.push(listener); events.set(name, listeners);
     },
   };
+  const document = {
+    getElementById: element, createElement: tag => new Element('', tag), visibilityState: 'visible',
+    addEventListener(name, listener) {
+      const listeners = documentEvents.get(name) || [];
+      listeners.push(listener); documentEvents.set(name, listeners);
+    },
+  };
+  const navigator = { onLine: true, ...options.navigator };
   const context = vm.createContext({
-    document: { getElementById: element, createElement: tag => new Element('', tag) }, window, PhotoError, PhotoQueue,
+    document, window, navigator, PhotoError, PhotoQueue,
+    PendingStorageError: class PendingStorageError extends Error {
+      constructor(message, code = 'STORAGE') { super(message); this.name = 'PendingStorageError'; this.code = code; }
+    },
+    supportsPendingUploads: () => options.pendingSupported ?? false,
+    async loadPendingBatch(...args) {
+      pendingCalls.push({ method: 'load', args });
+      return options.loadPending ? options.loadPending(...args) : pendingBatch;
+    },
+    async savePendingBatch(batch, ...args) {
+      pendingCalls.push({ method: 'save', batch, args });
+      if (options.savePending) await options.savePending(batch, ...args);
+      pendingBatch = batch;
+      return batch;
+    },
+    async clearPendingBatch(...args) {
+      pendingCalls.push({ method: 'clear', args });
+      if (options.clearPending) await options.clearPending(...args);
+      pendingBatch = null;
+      return true;
+    },
+    async withUploadLock(...args) {
+      lockCalls.push(args);
+      if (options.withUploadLock) return options.withUploadLock(...args);
+      const operation = args.find(arg => typeof arg === 'function');
+      return { acquired: true, value: await operation() };
+    },
     MAX_BYTES: 20 * 1024 * 1024,
     connect(token, callbacks = {}) {
       const pending = deferred();
@@ -143,19 +179,30 @@ function fixture(options = {}) {
     },
     onDeviceForgotten(listener) { forgottenListeners.push(listener); return () => {}; },
     URL: {
-      createObjectURL() { previewCount++; return 'blob:test-photo'; },
+      createObjectURL(file) {
+        if (options.pendingSupported) assert.ok(file instanceof Blob, 'Restored saved placeholders must never be used as image blobs');
+        previewCount++; return 'blob:test-photo';
+      },
       revokeObjectURL() {},
     },
-    Date, Intl, setTimeout, clearTimeout,
+    Date, Intl,
+    setTimeout(callback, delay) { const timer = setTimeout(callback, delay); timer.unref(); return timer; },
+    clearTimeout, queueMicrotask, crypto, Blob,
   });
   vm.runInContext(source, context, { filename: 'upload/app.mjs' });
   return {
-    element, card, captionField, selectCheckbox, removeButton, connections, probes, storageCalls,
+    element, card, captionField, selectCheckbox, removeButton, connections, probes, storageCalls, pendingCalls, lockCalls,
+    get pendingBatch() { return pendingBatch; },
     get stored() { return stored; },
     get revision() { return revision; },
     get previewCount() { return previewCount; },
     async event(name, detail = {}) {
       for (const listener of events.get(name) || []) listener(detail);
+      await flush();
+    },
+    async visibility(value) {
+      document.visibilityState = value;
+      for (const listener of documentEvents.get('visibilitychange') || []) listener();
       await flush();
     },
     async submit(token = TEST_TOKEN, remember = true) {
@@ -166,6 +213,7 @@ function fixture(options = {}) {
     },
     async click(id) { element(id).click(); await flush(); },
     async selectPhoto(files = [{ name: 'test.jpg', size: 20, type: 'image/jpeg' }]) {
+      for (const file of files) if (file && !file.arrayBuffer) file.arrayBuffer = async () => new ArrayBuffer(file.size);
       element('photo-library').files = files;
       element('photo-library').emit('change');
       await flush();
@@ -393,7 +441,7 @@ test('late connection failure does not replace a connection made after a bfcache
   assert.equal(countStorage(f, 'forget'), 0);
 });
 
-test('late preparation result after pagehide cannot revive an upload', async () => {
+test('late preparation result after pagehide cannot revive the obsolete client or replace an automatically resumed receipt', async () => {
   const preparation = deferred();
   let saves = 0;
   const { f } = await connected({ stored: TEST_TOKEN }, {
@@ -406,10 +454,12 @@ test('late preparation result after pagehide cannot revive an upload', async () 
   await f.event('pageshow', { persisted: true });
   f.connections[1].resolve(client());
   await flush();
+  const resumedStatus = status(f);
   preparation.resolve({ record: { id: 'obsolete' } });
   await flush();
   assert.equal(saves, 0);
-  assert.equal(f.element('upload-receipt').hidden, true);
+  assert.equal(status(f), resumedStatus);
+  assert.equal(f.element('upload-receipt').hidden, false);
   assert.equal(f.element('upload-form').attributes['aria-busy'], 'false');
 });
 
@@ -1216,4 +1266,356 @@ test('bulk caption validation rejects blank and overlong values but preserves an
   assert.equal(f.captionField().value, accepted, 'Meaningful spaces must not be stripped when copying the shared caption');
   await f.upload();
   assert.deepEqual(prepared, [['morning.jpg', accepted]]);
+});
+
+const durablePhotos = () => ['morning.jpg', 'lake.jpg'].map(name => new File(
+  [new Uint8Array([0xff, 0xd8, 0xff, 0xdb])], name,
+  { type: 'image/jpeg', lastModified: 1790000000000 },
+));
+
+function durableClient(overrides = {}) {
+  return client({
+    async prepare(file, caption, uploadId, { nameBase }) {
+      const fileName = `${nameBase}.jpg`;
+      return { record: { id: uploadId, originalName: file.name, fileName, displayName: nameBase,
+        caption, photoPath: `records/inbox/github-123/${uploadId}/${fileName}`,
+        uploadedAt: '2026-10-09T04:00:00Z' } };
+    },
+    ...overrides,
+  });
+}
+
+test('selected drafts never enter persistent upload storage or start automatically on visibility and network events', async () => {
+  let saves = 0;
+  const { f } = await connected({ pendingSupported: true }, durableClient({
+    async save() { saves++; throw new Error('Drafts are not authorized uploads'); },
+  }));
+  await f.selectPhoto(durablePhotos());
+  await f.caption('未点击保存的草稿');
+  await f.visibility('hidden');
+  await f.visibility('visible');
+  await f.event('online');
+  assert.equal(saves, 0);
+  assert.equal(f.pendingCalls.filter(call => call.method === 'save').length, 0);
+  assert.deepEqual(queueStates(f), ['pending', 'pending']);
+});
+
+test('first upload waits for durable local storage before any remote photo work', async () => {
+  const persisted = deferred();
+  let preparations = 0;
+  const real = durableClient();
+  const { f } = await connected({ pendingSupported: true, savePending: () => persisted.promise }, {
+    ...real,
+    async prepare(...args) { preparations++; return real.prepare(...args); },
+  });
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  assert.equal(f.pendingCalls.filter(call => call.method === 'save').length, 1);
+  assert.equal(preparations, 0, 'A selected file must not reach GitHub until its recoverable queue is saved');
+  persisted.resolve();
+  await flush();
+  await flush();
+  assert.equal(preparations, 2);
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+});
+
+test('quota failure does not silently start a nonrecoverable upload', async () => {
+  let preparations = 0;
+  const real = durableClient();
+  const { f } = await connected({ pendingSupported: true, savePending: async () => {
+    const error = new Error('private disk details'); error.name = 'PendingStorageError'; error.code = 'QUOTA'; throw error;
+  } }, { ...real, async prepare(...args) { preparations++; return real.prepare(...args); } });
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  assert.equal(preparations, 0);
+  assert.equal(f.element('upload-current-page').hidden, false);
+  assert.match(f.element('pending-storage-status').textContent, /未|无法|不足|失败/);
+  assert.ok(!f.element('pending-storage-status').textContent.includes('private disk details'));
+  await f.click('upload-current-page');
+  await flush();
+  assert.equal(preparations, 2, 'The user can explicitly choose current-page-only upload after storage fails');
+});
+
+test('switching tabs leaves an active upload connected and able to finish its remaining photos', async () => {
+  const firstSave = deferred();
+  let saves = 0, firstPrepared;
+  const { f, connection } = await connected({ pendingSupported: true }, durableClient({
+    async save(prepared) {
+      saves++;
+      if (saves === 1) { firstPrepared = prepared; return firstSave.promise; }
+      return { record: prepared.record, commitSha: 'a'.repeat(40) };
+    },
+  }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  await flush();
+  assert.equal(saves, 1);
+  await f.visibility('hidden');
+  assert.equal(connection.disconnected, 0);
+  firstSave.resolve({ record: firstPrepared.record, commitSha: 'a'.repeat(40) });
+  await flush();
+  await flush();
+  assert.equal(saves, 2);
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+});
+
+async function interruptedBatch() {
+  const queue = new PhotoQueue();
+  queue.add(durablePhotos());
+  let saves = 0;
+  await queue.run(durableClient({
+    async save(prepared) {
+      if (++saves === 1) return { record: prepared.record, commitSha: 'a'.repeat(40) };
+      throw new PhotoError('Network interrupted', 0, 'NETWORK');
+    },
+  }));
+  assert.deepEqual(queue.items.map(item => item.status), ['saved', 'uncertain']);
+  return { version: 1, id: crypto.randomUUID(), owner: { id: 123, login: 'TestTraveller' },
+    createdAt: '2026-10-09T04:00:00Z', backgroundRevision: 'revision-0', items: queue.snapshot() };
+}
+
+test('a restored started batch skips saved photos and reconciles an uncertain photo under its original upload ID', async () => {
+  const pendingBatch = await interruptedBatch();
+  const preparedIds = [], lookedUp = [];
+  let saves = 0;
+  const real = durableClient();
+  const f = fixture({ pendingSupported: true, pendingBatch, stored: TEST_TOKEN });
+  await flush();
+  assert.equal(f.connections.length, 1);
+  f.connections[0].resolve(durableClient({
+    async prepare(...args) { preparedIds.push(args[2]); return real.prepare(...args); },
+    async lookup(prepared) {
+      lookedUp.push(prepared.record.id);
+      return { record: prepared.record, commitSha: 'b'.repeat(40) };
+    },
+    async save() { saves++; throw new Error('Reconciled photos must not be uploaded twice'); },
+  }));
+  await flush();
+  await flush();
+  assert.deepEqual(preparedIds, [pendingBatch.items[1].uploadId]);
+  assert.deepEqual(lookedUp, [pendingBatch.items[1].uploadId]);
+  assert.equal(saves, 0);
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+});
+
+test('forgetting the device prevents an existing persistent batch from being resumed by lifecycle events', async () => {
+  const pendingBatch = await interruptedBatch();
+  const f = fixture({ pendingSupported: true, pendingBatch, stored: TEST_TOKEN });
+  await flush();
+  assert.equal(f.connections.length, 1);
+  await f.forgetFromOtherTab();
+  const staleConnection = durableClient();
+  f.connections[0].resolve(staleConnection);
+  await flush();
+  await f.visibility('visible');
+  await f.event('online');
+  await f.event('pageshow', { persisted: true });
+  assert.equal(staleConnection.disconnected, 1);
+  assert.equal(f.connections.length, 1);
+  assert.equal(f.pendingCalls.filter(call => call.method === 'save').length, 0);
+  assert.equal(f.element('choose-photo').disabled, true);
+});
+
+test('a busy upload lock prevents duplicate remote work and explains that another uploader owns the batch', async () => {
+  let preparations = 0;
+  const { f } = await connected({ pendingSupported: true, withUploadLock: async () => ({ acquired: false }) }, durableClient({
+    async prepare() { preparations++; throw new Error('Lock was not acquired'); },
+  }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  assert.equal(preparations, 0);
+  assert.equal(f.pendingCalls.filter(call => call.method === 'save').length, 0);
+  assert.match(f.element('upload-status').textContent, /后台|另一个页面/);
+  assert.equal(f.element('upload-form').attributes['aria-busy'], 'false');
+});
+
+test('wake lock refusal never claims the screen is awake and never blocks photo uploading', async () => {
+  let requests = 0;
+  const { f } = await connected({ pendingSupported: true, navigator: { wakeLock: {
+    async request(kind) { assert.equal(kind, 'screen'); requests++; throw new Error('Device refused'); },
+  } } }, durableClient());
+  assert.equal(f.element('keep-screen-awake').checked, true);
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  await flush();
+  assert.equal(requests, 1);
+  assert.doesNotMatch(f.element('background-status').textContent, /屏幕保持唤醒中/);
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+});
+
+test('unchecking screen wake releases its lock and immediately stops claiming that the screen remains awake', async () => {
+  const save = deferred(), released = [];
+  const releaseListeners = [];
+  const { f } = await connected({ pendingSupported: true, navigator: { wakeLock: {
+    async request() {
+      return {
+        addEventListener(name, listener) { assert.equal(name, 'release'); releaseListeners.push(listener); },
+        async release() { released.push(true); for (const listener of releaseListeners) listener(); },
+      };
+    },
+  } } }, durableClient({ save: () => save.promise }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  assert.match(f.element('background-status').textContent, /屏幕保持唤醒中/);
+  f.element('keep-screen-awake').checked = false;
+  f.element('keep-screen-awake').emit('change');
+  await flush();
+  assert.equal(released.length, 1);
+  assert.doesNotMatch(f.element('background-status').textContent, /屏幕保持唤醒中/);
+});
+
+test('a browser with service workers but without background sync only promises restoration after returning', async () => {
+  const { f } = await connected({ pendingSupported: true, navigator: { serviceWorker: {
+    async register() { return { active: { postMessage() {} } }; },
+    addEventListener() {},
+  } } });
+  assert.doesNotMatch(f.element('background-status').textContent, /支持后台同步/);
+  assert.match(f.element('background-status').textContent, /切回|返回/);
+  assert.match(f.element('background-status').textContent, /可能暂停/);
+});
+
+test('current-page fallback waits for removal of a partially persisted batch before any remote save', async () => {
+  const removed = deferred();
+  let checkpoints = 0, saves = 0;
+  const { f } = await connected({ pendingSupported: true,
+    async savePending() {
+      if (++checkpoints > 1) { const error = new Error('Disk full'); error.name = 'PendingStorageError'; throw error; }
+    },
+    clearPending: () => removed.promise,
+  }, durableClient({ async save(prepared) { saves++; return receipt(prepared); } }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  assert.equal(f.element('upload-current-page').hidden, false);
+  assert.ok(f.pendingBatch);
+  assert.equal(saves, 0);
+  await f.click('upload-current-page');
+  assert.equal(f.pendingCalls.filter(call => call.method === 'clear').length, 1);
+  assert.equal(saves, 0, 'Persisted tasks must be disabled before page-only execution can proceed');
+  removed.resolve();
+  await flush();
+  await flush();
+  assert.equal(saves, 2);
+  assert.equal(f.pendingBatch, null);
+});
+
+test('current-page fallback must not bypass a background worker that still owns the upload lock', async () => {
+  let locks = 0, saves = 0, checkpoints = 0;
+  const { f } = await connected({ pendingSupported: true,
+    async withUploadLock(operation) {
+      if (++locks > 1) return { acquired: false };
+      return { acquired: true, value: await operation() };
+    },
+    async savePending() {
+      if (++checkpoints > 1) { const error = new Error('Disk full'); error.name = 'PendingStorageError'; throw error; }
+    },
+  }, durableClient({ async save(prepared) { saves++; return receipt(prepared); } }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  await f.click('upload-current-page');
+  assert.equal(saves, 0);
+  assert.equal(f.pendingCalls.filter(call => call.method === 'clear').length, 0);
+  assert.ok(f.pendingBatch);
+  assert.match(f.element('pending-storage-status').textContent, /后台|稍后/);
+});
+
+test('invalid photos in a persisted batch can be removed so the completed batch releases storage and accepts a new selection', async () => {
+  const real = durableClient();
+  const { f } = await connected({ pendingSupported: true }, durableClient({
+    async prepare(file, ...args) {
+      if (file.name === 'morning.jpg') throw new PhotoError('Invalid image', 415, 'INVALID');
+      return real.prepare(file, ...args);
+    },
+  }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  await flush();
+  assert.deepEqual(queueStates(f), ['invalid', 'saved']);
+  assert.ok(f.pendingBatch);
+  await f.removeItem(0);
+  await flush();
+  await flush();
+  assert.deepEqual(queueStates(f), ['saved']);
+  assert.equal(f.pendingBatch, null);
+  assert.equal(f.element('upload-receipt').hidden, false);
+  await f.click('upload-next');
+  await f.selectPhoto(durablePhotos().slice(0, 1));
+  assert.deepEqual(queueStates(f), ['pending']);
+});
+
+test('network recovery resumes the previously started batch automatically using its stable upload ID', async () => {
+  const real = durableClient(), preparedIds = [], savedIds = [];
+  const { f } = await connected({ pendingSupported: true }, durableClient({
+    async prepare(...args) { preparedIds.push(args[2]); return real.prepare(...args); },
+    async save(prepared) {
+      savedIds.push(prepared.record.id);
+      if (savedIds.length === 1) throw new PhotoError('Offline', 0, 'NETWORK');
+      return receipt(prepared);
+    },
+  }));
+  await f.selectPhoto(durablePhotos().slice(0, 1));
+  await f.upload();
+  await flush();
+  assert.deepEqual(queueStates(f), ['uncertain']);
+  assert.equal(savedIds.length, 1);
+  await f.event('online');
+  await flush();
+  assert.deepEqual(queueStates(f), ['saved']);
+  assert.equal(savedIds.length, 2);
+  assert.equal(savedIds[0], savedIds[1]);
+  assert.deepEqual(preparedIds, savedIds);
+});
+
+test('retrying the regular upload button after the first local save fails preserves the original batch and photo IDs', async () => {
+  const preparedIds = [], real = durableClient();
+  let storageAttempts = 0;
+  const { f } = await connected({ pendingSupported: true,
+    async savePending() {
+      if (++storageAttempts === 1) {
+        const error = new Error('Disk full'); error.name = 'PendingStorageError'; throw error;
+      }
+    },
+  }, durableClient({
+    async prepare(...args) { preparedIds.push(args[2]); return real.prepare(...args); },
+  }));
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  assert.equal(preparedIds.length, 0);
+  assert.equal(f.pendingBatch, null, 'The failed initial write must not masquerade as a saved batch');
+  const attemptedBatch = f.pendingCalls.find(call => call.method === 'save').batch;
+  assert.equal(f.element('upload-submit').disabled, false);
+  await f.upload();
+  await flush();
+  const persisted = f.pendingCalls.filter(call => call.method === 'save');
+  assert.equal(persisted[1].batch.id, attemptedBatch.id);
+  assert.deepEqual(preparedIds, attemptedBatch.items.map(item => item.uploadId));
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+  assert.equal(f.element('upload-receipt').hidden, false);
+  assert.doesNotMatch(f.element('upload-status').textContent, /上次任务已处理/);
+});
+
+test('completed batch cleanup holds the original upload lock and never relies on acquiring a second lock', async () => {
+  let lockHeld = false, lockAttempts = 0, clears = 0;
+  const { f } = await connected({ pendingSupported: true,
+    async withUploadLock(operation) {
+      if (++lockAttempts > 1) return { acquired: false };
+      lockHeld = true;
+      try { return { acquired: true, value: await operation() }; }
+      finally { lockHeld = false; }
+    },
+    async clearPending() {
+      assert.equal(lockHeld, true, 'A completed batch must be removed before handing its lock to a background worker');
+      clears++;
+    },
+  }, durableClient());
+  await f.selectPhoto(durablePhotos());
+  await f.upload();
+  await flush();
+  assert.equal(lockAttempts, 1);
+  assert.equal(clears, 1);
+  assert.equal(f.pendingBatch, null);
+  assert.deepEqual(queueStates(f), ['saved', 'saved']);
+  await f.click('upload-next');
+  assert.equal(f.element('choose-photo').disabled, false);
+  await f.selectPhoto(durablePhotos().slice(0, 1));
+  assert.deepEqual(queueStates(f), ['pending']);
 });

@@ -1,6 +1,8 @@
-import { PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20260929-cards';
-import { PhotoQueue } from './queue.mjs?v=20260929-cards';
+import { PhotoError, connect, connectionErrorMessage, probeGitHub } from './github.mjs?v=20261009-background';
+import { PhotoQueue } from './queue.mjs?v=20261009-background';
 import { loadDeviceConnection, getDeviceRevision, rememberDeviceToken, forgetDeviceToken, onDeviceForgotten } from './device-credential.mjs';
+
+import { supportsPendingUploads, loadPendingBatch, savePendingBatch, clearPendingBatch, withUploadLock } from './pending-store.mjs?v=20261009-background';
 
 const $ = id => document.getElementById(id);
 const queue = new PhotoQueue();
@@ -13,10 +15,15 @@ const inputs = [$('photo-library'),$('photo-camera')];
 let client = null, connecting = false, busy = false, checkingNetwork = false, connectionGeneration = 0;
 let deviceBusy = false, remembered = false, storageQueue = Promise.resolve();
 let clientRevision = null, autoRestoreAllowed = true;
+let pendingBatch = null, pendingSaved = false, initializing = true, resumeWanted = false, retryCount = 0, retryTimer = null;
+let workerRegistration = null, wakeLock = null, wakeGeneration = 0, currentPageOnly = false;
+const nav = globalThis.navigator;
+const isVisible = () => document.visibilityState !== 'hidden';
+const durableAvailable = () => supportsPendingUploads() && !currentPageOnly;
 const selectedPhoto = () => queue.items.find(item => item.id === selectedId);
 const hasUncertain = () => queue.uncertain;
-const canEditCaption = item => !item.prepared && !item.receipt && !item.uncertain;
-const captionControlsLocked = () => !client || connecting || deviceBusy || busy;
+const canEditCaption = item => !pendingBatch && !item.prepared && !item.receipt && !item.uncertain;
+const captionControlsLocked = () => !client || connecting || deviceBusy || busy || !!pendingBatch;
 
 function setStatus(id,message,state='') { $(id).textContent=message; $(id).dataset.state=state; }
 function deviceOperation(operation) {
@@ -25,7 +32,7 @@ function deviceOperation(operation) {
  return result;
 }
 function update() {
- const unavailable = !client || connecting || deviceBusy;
+ const unavailable = !client || connecting || deviceBusy || initializing;
  const item=selectedPhoto(), locked=busy || unavailable;
  $('connect-form').hidden=!!client;
  $('connected-user').hidden=!client;
@@ -44,8 +51,8 @@ function update() {
  $('upload-fields').disabled=unavailable;
  $('upload-submit').disabled=unavailable || busy || !queue.pending;
  $('upload-submit').textContent=busy?'正在依次保存…':hasUncertain()?'核对并继续上传':queue.pending?`保存 ${queue.pending} 张照片 ↗`:'保存照片 ↗';
- ['choose-photo','take-photo'].forEach(id=>{$(id).disabled=locked || hasUncertain();});
- inputs.forEach(input=>{input.disabled=locked || hasUncertain();});
+ ['choose-photo','take-photo'].forEach(id=>{$(id).disabled=locked || hasUncertain() || !!pendingBatch;});
+ inputs.forEach(input=>{input.disabled=locked || hasUncertain() || !!pendingBatch;});
  $('upload-form').setAttribute('aria-busy',String(busy));
  $('photo-info').hidden=!item;
  $('photo-empty').hidden=!!item;
@@ -54,6 +61,7 @@ function update() {
  $('upload-receipt').hidden=!queue.complete;
  renderQueue(locked);
  if(queue.complete) renderReceipt();
+ updateBackgroundStatus();
 }
 function disconnectClient() {
  connectionGeneration++;
@@ -146,7 +154,7 @@ async function connectToken(token,{remember=false,fromStorage=false,generation,r
  } finally {
   if(next) next.disconnect();
   token='';
-  if(generation===connectionGeneration) { connecting=false; update(); }
+  if(generation===connectionGeneration) { connecting=false; update(); maybeResume(); }
  }
 }
 async function restoreDeviceConnection() {
@@ -186,7 +194,7 @@ $('retry-connection').addEventListener('click',()=>{autoRestoreAllowed=true;void
 $('forget-device').addEventListener('click',async()=>{
  if(busy || deviceBusy) return;
  disconnectClient();
- autoRestoreAllowed=false;
+ autoRestoreAllowed=false; resumeWanted=false; clearTimeout(retryTimer); releaseWakeLock();
  const generation=connectionGeneration;
  deviceBusy=true; setStatus('connection-status','正在清除此设备保存的连接…'); update();
  try {
@@ -194,7 +202,7 @@ $('forget-device').addEventListener('click',async()=>{
   if(generation!==connectionGeneration) return;
   if(removed!==true) throw new Error('Device connection was not removed');
   remembered=false;
-  if(!hasUncertain()) reset();
+  if(!hasUncertain() && !pendingBatch) reset();
   setStatus('connection-status',hasUncertain()?'已忘记此设备。上次上传尚未确认，请重新输入原照片库的密钥后核对。':'已忘记此设备，下次连接时需重新输入密钥。','success');
  } catch {
   if(generation===connectionGeneration) {
@@ -205,11 +213,12 @@ $('forget-device').addEventListener('click',async()=>{
 });
 onDeviceForgotten(()=>{
  disconnectClient();
- busy=false; remembered=false; autoRestoreAllowed=false;
+ busy=false; remembered=false; autoRestoreAllowed=false; resumeWanted=false; clearTimeout(retryTimer); releaseWakeLock();
  setStatus('connection-status','此设备的连接已在其他页面清除。需要上传时，请重新输入连接密钥。');
  update();
 });
 function previewFor(item) {
+ if(!item.file || typeof item.file.arrayBuffer !== 'function') return null;
  if(!previewUrls.has(item.id)) previewUrls.set(item.id,URL.createObjectURL(item.file));
  return previewUrls.get(item.id);
 }
@@ -221,12 +230,14 @@ function selectItem(id) {
   $('photo-name').textContent=item.fileName || item.nameBase || item.file.name;
   $('photo-size').textContent=(item.file.size/1024/1024).toLocaleString('zh-CN',{maximumFractionDigits:2})+' MB';
   $('preview-image').hidden=false; $('preview-fallback').hidden=true;
-  $('preview-image').src=previewFor(item);
+  const preview=previewFor(item);
+  if(preview) $('preview-image').src=preview; else { $('preview-image').hidden=true; $('preview-fallback').hidden=false; }
  }
  update();
 }
 const statusLabels={pending:'待上传',preparing:'检查原图',uploading:'正在保存',saved:'已保存',invalid:'未通过校验',failed:'待重试',uncertain:'待核对'};
 function removeItem(id) {
+ if(pendingBatch) { void removePersistedItem(id); return; }
  if(busy || !client || connecting || deviceBusy || !queue.remove(id)) return;
  if(previewUrls.has(id)) URL.revokeObjectURL(previewUrls.get(id));
  previewUrls.delete(id);
@@ -245,7 +256,7 @@ function createPhotoCard(item) {
   setStatus('bulk-status',''); update();
  });
  const button=document.createElement('button'); button.type='button'; button.className='queue-item';
- const thumb=document.createElement('img'); thumb.src=previewFor(item); thumb.alt=''; thumb.loading='lazy';
+ const thumb=document.createElement('img'); const preview=previewFor(item); if(preview) thumb.src=preview; else thumb.hidden=true; thumb.alt=''; thumb.loading='lazy';
  thumb.addEventListener('error',()=>{thumb.hidden=true;});
  const details=document.createElement('span'); details.className='queue-details';
  const name=document.createElement('strong');
@@ -265,7 +276,7 @@ function createPhotoCard(item) {
  const remove=document.createElement('button'); remove.type='button'; remove.className='text-button remove-card-photo'; remove.textContent='移除照片';
  remove.addEventListener('click',()=>removeItem(item.id));
  caption.addEventListener('input',()=>{
-  if(!client || connecting || deviceBusy || busy || item.prepared || item.receipt || item.uncertain) return;
+  if(!client || connecting || deviceBusy || busy || pendingBatch || item.prepared || item.receipt || item.uncertain) return;
   item.caption=caption.value;
   counter.textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
   state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
@@ -296,7 +307,7 @@ function renderQueue(locked) {
   card.name.textContent=item.fileName || item.nameBase || item.file.name;
   card.state.textContent=(statusLabels[item.status] || '待上传')+(item.caption?' · 有附言':'')+(item.error?` · ${item.error}`:'');
   card.label.textContent=`第 ${index+1} 张照片的附言（选填）`;
-  card.caption.disabled=locked || !!item.prepared || !!item.receipt || item.uncertain;
+  card.caption.disabled=locked || !!pendingBatch || !!item.prepared || !!item.receipt || item.uncertain;
   if(card.caption.value!==item.caption) card.caption.value=item.caption;
   card.counter.textContent=item.caption.length.toLocaleString('zh-CN')+' / 4,000';
   card.remove.disabled=locked || !!item.prepared || !!item.receipt || item.uncertain;
@@ -348,6 +359,8 @@ $('bulk-apply').addEventListener('click',()=>{
 });
 function reset() {
  if(!queue.clear()) return;
+ resumeWanted=false; clearTimeout(retryTimer); currentPageOnly=false;
+ $('upload-current-page').hidden=true; setStatus('pending-storage-status','');
  for(const url of previewUrls.values()) URL.revokeObjectURL(url);
  previewUrls.clear(); selectedId=null; batchSelected.clear();
  $('bulk-caption').value=''; setStatus('bulk-status','');
@@ -357,7 +370,7 @@ function reset() {
  setStatus('photo-error',''); setStatus('upload-status',''); update();
 }
 function choose(files) {
- if(!client || connecting || deviceBusy || busy || hasUncertain() || !files?.length) return;
+ if(!client || connecting || deviceBusy || busy || pendingBatch || hasUncertain() || !files?.length) return;
  // Browser MIME metadata is inconsistent for JPG and phone exports. Check the
  // actual bytes during prepare(), instead of rejecting a valid filename here.
  const {added,errors}=queue.add(Array.from(files));
@@ -397,45 +410,234 @@ async function requireReconnect() {
  deviceBusy=false; update();
  return true;
 }
-$('upload-form').addEventListener('submit',async event=>{
- event.preventDefault();
- if(!client || connecting || deviceBusy || !queue.pending || busy) return;
- const uploadClient=client, generation=connectionGeneration;
- busy=true; setStatus('upload-status','正在依次保存。请保持页面打开。'); update();
+function updateBackgroundStatus() {
+ const pending = busy || queue.pending > 0;
+ $('keep-screen-awake').disabled = !nav?.wakeLock;
+ const sleepHint = wakeLock ? '屏幕保持唤醒中。' : '';
+ let text;
+ if (currentPageOnly) text = '本次仅在当前页面上传，请保持页面打开。';
+ else if (!supportsPendingUploads()) text = '此浏览器无法保存续传队列，请保持上传页面打开。';
+ else if (workerRegistration?.sync && remembered) text = '支持后台同步；系统仍可能暂停任务，返回页面后会自动续传。';
+ else text = '已开始的上传可保存到此设备；切回页面会自动续传。后台或锁屏时可能暂停。';
+ setStatus('background-status', sleepHint + text);
+ if (!pending) releaseWakeLock();
+}
+async function acquireWakeLock() {
+ if (!busy || !isVisible() || !$('keep-screen-awake').checked || !nav?.wakeLock || wakeLock) return;
+ const epoch=++wakeGeneration;
  try {
-  const result=await queue.run(uploadClient,{
-   isCurrent:()=>generation===connectionGeneration,
-   onChange:()=>{if(generation===connectionGeneration) update();},
-   onProgress:(item,progress)=>{if(generation===connectionGeneration) setProgress(item,progress);}
+  const lock=await nav.wakeLock.request('screen');
+  if(epoch!==wakeGeneration || !busy || !isVisible() || !$('keep-screen-awake').checked) { await lock.release(); return; }
+  wakeLock=lock;
+  lock.addEventListener('release',()=>{ if(wakeLock===lock) { wakeLock=null; updateBackgroundStatus(); } });
+  updateBackgroundStatus();
+ } catch { /* Screen wake lock is optional and never blocks an upload. */ }
+}
+function releaseWakeLock() {
+ wakeGeneration++;
+ const lock=wakeLock; wakeLock=null;
+ if(lock) void lock.release().catch(()=>{});
+}
+async function registerBackground() {
+ if(!supportsPendingUploads() || !nav?.serviceWorker) return;
+ try {
+  workerRegistration=await nav.serviceWorker.register('./sw.mjs?v=20261009-background',{type:'module',scope:'./'});
+  workerRegistration.installing?.addEventListener('statechange',()=>{if(workerRegistration?.active) void scheduleBackground();});
+  void scheduleBackground(); updateBackgroundStatus();
+ } catch { workerRegistration=null; updateBackgroundStatus(); }
+}
+async function scheduleBackground() {
+ if(!pendingBatch?.backgroundRevision || !workerRegistration?.sync) return;
+ try { await workerRegistration.sync.register('xinjiang-photo-uploads'); } catch {}
+}
+function notifyBackground() {
+ if(pendingBatch?.backgroundRevision) workerRegistration?.active?.postMessage({type:'resume-uploads'});
+}
+async function removePersistedItem(id) {
+ if(busy || !client || connecting || deviceBusy) return;
+ busy=true; update();
+ try {
+  const result=await withUploadLock(async()=>{
+   const stored=await loadPendingBatch();
+   if(!stored || stored.id!==pendingBatch?.id || String(stored.owner.id)!==String(client.user.id)) return;
+   restoreQueue(stored);
+   if(!queue.remove(id)) return;
+   if(queue.items.length) await savePendingBatch({...pendingBatch,items:queue.snapshot()});
+   else {await clearPendingBatch(pendingBatch.id);pendingBatch=null;pendingSaved=false;}
+   restoreQueueView();
   });
-  if(generation!==connectionGeneration || result.stale) return;
+  if(!result.acquired) setStatus('upload-status','后台正在处理，暂时不能移除照片。','notice');
+ } catch {setStatus('pending-storage-status','未能保存队列修改，请稍后重试。','error');}
+ finally {busy=false;update();}
+ if(queue.complete && pendingBatch) void runUpload({automatic:true});
+}
+function restoreQueueView() {
+ for(const url of previewUrls.values()) URL.revokeObjectURL(url);
+ previewUrls.clear(); cardNodes.clear(); batchSelected.clear(); renderedQueueIds=[];
+ selectedId=queue.items.find(item=>!item.receipt)?.id || queue.items[0]?.id || null;
+ selectItem(selectedId);
+}
+function restoreQueue(batch) {
+ for(const url of previewUrls.values()) URL.revokeObjectURL(url);
+ previewUrls.clear(); cardNodes.clear(); batchSelected.clear(); renderedQueueIds=[];
+ queue.restore(batch.items); pendingBatch=batch; pendingSaved=true;
+ selectedId=queue.items.find(item=>!item.receipt)?.id || queue.items[0]?.id || null;
+ selectItem(selectedId);
+}
+function maybeResume() {
+ if(initializing || !resumeWanted || !autoRestoreAllowed || busy || connecting || deviceBusy || !isVisible() || nav?.onLine===false) return;
+ if(!client) { void restoreDeviceConnection(); return; }
+ void runUpload({automatic:true});
+}
+function retryLater(error) {
+ if(!resumeWanted || !['NETWORK','TIMEOUT','RESPONSE','HTTP'].includes(error?.code) || retryCount>=3) return;
+ clearTimeout(retryTimer);
+ retryTimer=setTimeout(()=>{ if(isVisible()) maybeResume(); },[10000,30000,60000][retryCount++]);
+}
+async function runUpload({automatic=false}={}) {
+ if(!client || connecting || deviceBusy || initializing || busy || (!queue.pending && !pendingBatch)) return;
+ if(!automatic) { resumeWanted=true; retryCount=0; clearTimeout(retryTimer); }
+ const uploadClient=client, generation=connectionGeneration;
+ busy=true; setStatus('upload-status','正在保存上传队列…'); update(); void acquireWakeLock();
+ const current=()=>generation===connectionGeneration;
+ const execute=async()=>{
+  if(!current()) return {stale:true};
+  if(durableAvailable()) {
+   const stored=await loadPendingBatch();
+   if(!current()) return {stale:true};
+   if(stored && stored.id!==pendingBatch?.id && queue.items.length) {
+    setStatus('upload-status','此设备另一个页面有待上传任务。请先完成该任务，再上传本批照片。','notice');
+    resumeWanted=false; return {stale:true};
+   }
+   if(stored) {
+    if(String(stored.owner.id)!==String(uploadClient.user.id)) throw new PhotoError('请使用原照片库账号恢复上次上传。',409,'ACCOUNT');
+    restoreQueue(stored);
+   } else if(pendingBatch && pendingSaved) {
+    // A background worker or another tab has already cleared the completed batch.
+    pendingBatch=null; resumeWanted=false;
+    setStatus('upload-status','上次任务已处理，请到旅行回忆查看已保存照片。','success');
+    return {stale:true};
+   }
+   if(!pendingBatch) { pendingSaved=false; pendingBatch={version:1,id:crypto.randomUUID(),owner:{id:uploadClient.user.id,login:uploadClient.user.login},createdAt:new Date().toISOString(),backgroundRevision:null,items:queue.snapshot()}; }
+   if(String(pendingBatch.owner.id)!==String(uploadClient.user.id)) throw new PhotoError('请使用原照片库账号恢复上次上传。',409,'ACCOUNT');
+   pendingBatch.backgroundRevision=remembered && clientRevision!==null ? clientRevision : null;
+   await savePendingBatch({...pendingBatch,items:queue.snapshot()}); pendingSaved=true;
+   setStatus('pending-storage-status','上传队列已保存到此设备，切走或刷新后可恢复。','success');
+   $('upload-current-page').hidden=true;
+   void scheduleBackground();
+  }
+  if(!current()) return {stale:true};
+  setStatus('upload-status','正在依次保存照片…');
+  const result=await queue.run(uploadClient,{
+   isCurrent:current,
+   checkpoint:async()=>{
+    if(!current()) throw new PhotoError('上传已暂停。',401,'AUTH');
+    if(clientRevision!==null && await getDeviceRevision()!==clientRevision) throw new PhotoError('此设备的连接已改变，请重新连接。',401,'AUTH');
+    if(durableAvailable()) await savePendingBatch({...pendingBatch,items:queue.snapshot()});
+   },
+   onChange:()=>{if(current()) update();},
+   onProgress:(item,progress)=>{if(current()) setProgress(item,progress);}
+  });
+  if(current() && result.complete && durableAvailable() && pendingBatch) {
+   await clearPendingBatch(pendingBatch.id);
+   if(current()) {pendingBatch=null;pendingSaved=false;}
+  }
+  return result;
+ };
+ try {
+  const locked=durableAvailable()?await withUploadLock(execute):{acquired:true,value:await execute()};
+  if(!current()) return;
+  if(!locked.acquired) {
+   setStatus('upload-status','后台或另一个页面正在上传，进度会自动同步。');
+   clearTimeout(retryTimer); retryTimer=setTimeout(maybeResume,5000); return;
+  }
+  const result=locked.value;
+  if(!result || result.stale) return;
   if(result.error) {
+   if(result.checkpointError?.name==='PendingStorageError' && !authenticationError(result.error)) throw result.checkpointError;
+   if(result.error.name==='PendingStorageError') throw result.error;
    if(authenticationError(result.error)) {
     if(!await requireReconnect()) return;
-   } else if(['PERMISSION','ACCOUNT'].includes(result.error.code)) {
-    disconnectClient(); busy=false;
-    setStatus('connection-status',connectionError(result.error),'error');
-    update();
+   } else if(['PERMISSION','ACCOUNT','PRIVATE','CONFIG'].includes(result.error.code)) {
+    resumeWanted=false; disconnectClient(); busy=false;
+    setStatus('connection-status',connectionError(result.error),'error'); update();
    }
-   setStatus('upload-status',connectionError(result.error)+' 已成功的照片会保留；请保持本页，恢复连接后继续上传。','error');
+   setStatus('upload-status',connectionError(result.error)+(durableAvailable()?' 已保存进度，恢复网络或返回本页后继续核对。':' 请保留本页和原图后重试。'),'error');
+   retryLater(result.error); void scheduleBackground();
   } else if(!queue.complete) {
+   resumeWanted=false;
    setStatus('upload-status','可上传的照片已处理。未通过校验的照片标在列表中，可以移除或重新选择。','notice');
   } else {
-   setStatus('upload-status','全部照片已保存。','success');
-   $('receipt-title').focus();
+   resumeWanted=false; clearTimeout(retryTimer);
+   setStatus('pending-storage-status','全部照片已确认保存，本机待传副本已释放。','success');
+   setStatus('upload-status','全部照片已保存。','success'); $('receipt-title').focus();
   }
- } catch {
-  if(generation===connectionGeneration) {
+ } catch(error) {
+  if(current()) {
    queue.interrupt();
-   setStatus('upload-status','暂未完成本批上传。请保留本页和原图，稍后继续核对。','error');
+   if(error?.name==='PendingStorageError') {
+    resumeWanted=false;
+    setStatus('pending-storage-status','此设备未能保存续传队列，可能空间不足。本次尚不能保证切走后恢复。','error');
+    $('upload-current-page').hidden=false;
+    setStatus('upload-status','请腾出存储空间后重试，或选择“仅在本页继续”。','error');
+   } else if(error?.code==='ACCOUNT') { resumeWanted=false; setStatus('upload-status',error.message,'error'); }
+   else { setStatus('upload-status','本批上传暂未完成；返回页面或恢复网络后将核对续传。','error'); retryLater(error); }
   }
  } finally {
-  if(generation===connectionGeneration) { busy=false; $('upload-progress-wrap').hidden=true; update(); }
+  releaseWakeLock();
+  if(current()) { busy=false; $('upload-progress-wrap').hidden=true; update(); }
  }
+}
+$('upload-form').addEventListener('submit',event=>{event.preventDefault();void runUpload();});
+$('upload-current-page').addEventListener('click',async()=>{
+ if(busy) return;
+ busy=true; update();
+ try {
+  if(supportsPendingUploads() && pendingBatch) {
+   const expected=pendingBatch.id;
+   const result=await withUploadLock(async()=>{
+    const stored=await loadPendingBatch();
+    if(stored && stored.id!==expected) throw new Error('Another batch is active');
+    if(stored) await clearPendingBatch(expected);
+   });
+   if(!result.acquired) {setStatus('pending-storage-status','后台仍在处理这批照片，请稍后再试。','notice');return;}
+  }
+  currentPageOnly=true; pendingBatch=null; pendingSaved=false; $('upload-current-page').hidden=true;
+  setStatus('pending-storage-status','本次仅在页面内保存队列，离开页面可能需要重新选择照片。','notice');
+ } catch {setStatus('pending-storage-status','本机队列尚未安全停用，请先腾出存储空间后重试。','error');return;}
+ finally {busy=false;update();}
+ void runUpload();
 });
-window.addEventListener('beforeunload',event=>{if(busy || hasUncertain() || queue.pending){event.preventDefault();event.returnValue='';}});
-window.addEventListener('pagehide',()=>{disconnectClient();busy=false;update();});
-window.addEventListener('pageshow',event=>{if(event.persisted && !client && autoRestoreAllowed) void restoreDeviceConnection();});
-setStatus('connection-status','正在准备照片库…');
-update();
-void restoreDeviceConnection();
+$('keep-screen-awake').addEventListener('change',()=>{ if($('keep-screen-awake').checked) void acquireWakeLock(); else {releaseWakeLock();updateBackgroundStatus();} });
+window.addEventListener('beforeunload',event=>{if((!durableAvailable() || !pendingSaved) && (busy || hasUncertain() || queue.pending)){event.preventDefault();event.returnValue='';}});
+window.addEventListener('pagehide',()=>{if(busy) resumeWanted=true; notifyBackground(); disconnectClient();busy=false;releaseWakeLock();update();});
+window.addEventListener('pageshow',event=>{if(event.persisted && autoRestoreAllowed) { if(!client) void restoreDeviceConnection(); else maybeResume(); }});
+window.addEventListener('online',()=>{retryCount=0;maybeResume();});
+document.addEventListener?.('visibilitychange',()=>{
+ if(isVisible()) {retryCount=0; if(busy) void acquireWakeLock(); else maybeResume();}
+ else {releaseWakeLock();updateBackgroundStatus();void scheduleBackground();}
+});
+async function refreshBackgroundProgress() {
+ if(!pendingBatch || busy || !client || !isVisible()) return;
+ const expected=pendingBatch.id,generation=connectionGeneration;
+ try {
+  const latest=await loadPendingBatch();
+  if(generation!==connectionGeneration || busy || expected!==pendingBatch?.id || latest?.id!==expected) return;
+  restoreQueue(latest);
+  const saved=queue.items.filter(item=>item.receipt).length;
+  setStatus('upload-status',`已同步上传进度：${saved} / ${queue.items.length} 张已保存。`);
+  if(queue.complete) {resumeWanted=true;maybeResume();}
+ } catch { /* A later foreground resume can retry reading the queue. */ }
+}
+nav?.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='upload-queue-changed') void refreshBackgroundProgress();});
+async function initializeUploads() {
+ setStatus('connection-status','正在准备照片库…'); update();
+ if(supportsPendingUploads()) {
+  try {
+   const existing=await loadPendingBatch();
+   if(existing) { restoreQueue(existing); resumeWanted=true; setStatus('pending-storage-status','已找回上次上传队列，连接后自动核对续传。','success'); }
+  } catch {setStatus('pending-storage-status','未能读取本机待传队列，请检查浏览器存储空间后刷新。','error');}
+ }
+ initializing=false; update(); void registerBackground(); await restoreDeviceConnection();
+}
+void initializeUploads();

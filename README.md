@@ -76,7 +76,17 @@ GitHub Actions 中的 `PHOTO_UPLOAD_TOKEN` 仅用于隔离的权限验证，不�
 
 支持批量选择并依次保存，每张照片卡片下方都有独立的附言框，无需切换照片即可分别填写，也可勾选任意多张或全选可编辑照片，将同一份附言批量应用到所选照片；应用会替换所选照片已有的附言，之后仍可逐张修改，支持 JPEG、PNG、WebP、HEIC / HEIF，单张最大 20 MiB。列表显示每张的保存状态；校验未通过的照片不影响其他照片，网络中断后可在原页面继续核对和上传，跳过已经确认成功的照片。格式以实际文件内容为准，不因浏览器提供非标准或空 JPEG MIME 而拦截。新照片统一命名为 `新疆旅行_YYYYMMDD_序号_UUID前8位.<扩展名>`（日期为北京时间的上传日期，扩展名按真实内容识别），存入 `records/inbox/github-<GitHub账号ID>/<上传UUID>/<规范文件名>`，相邻 `record.json` 保存规范名、说明、原名、上传时间、哈希及上传者；拍摄时间和地点先留空，后续根据原图与说明分析。保留原始字节和原图已有 EXIF，手机选择器可能影响交付给网页的文件信息。
 
-提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。保存回执丢失时保留当前页面，再用相同编号查证或重试。记住连接不等于保存待上传照片；刷新会丢失未完成上传的编号，不能保证刷新后重新上传不重复。若两人使用同一个 GitHub token，上传记录仍为同一个 GitHub 身份；可在附言中注明拍摄者。
+提交前后校验仓库私有状态；照片和说明通过一次 Git 提交生效，更新 main 时不强制覆盖。上传前保存固定编号，结果不确定时先核对同一编号，跳过已确认保存的照片。若两人使用同一个 GitHub token，上传记录仍为同一个 GitHub 身份；可在附言中注明拍摄者。
+
+### 后台上传与自动续传
+
+点击“保存”后，支持 IndexedDB 和 Web Locks 的浏览器会先将待上传原图、附言与上传编号保存到本设备，再开始上传。切换页面、刷新或断网后，回到同一浏览器的上传页可自动恢复；已确认成功的照片释放本机队列中的原图副本。仅选图、未点击保存的草稿不会保存。队列开始后附言锁定，避免后台上传时发生冲突。
+
+已记住连接且支持 Background Sync 的浏览器会尝试在离开页面后继续上传。网页与 Service Worker 共用一把上传锁，避免重复写入；Service Worker 不缓存页面、图片或密钥。忘记设备会停止后续自动续传。取消“记住此设备”时，仅在打开页面并重新连接后续传，不把临时令牌交给后台。
+
+手机系统仍可能冻结或终止后台任务，尤其是 iPhone 上的 Safari / Chrome；不能保证切换 App、锁屏或关闭浏览器后持续上传。返回上传页后继续即可。“上传时保持屏幕唤醒”在浏览器允许时防止上传页自动熄屏。相关限制见 [MDN 后台运行说明](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Offline_and_background_operation)。
+
+空间不足或浏览器不支持时，页面会明确显示状态，可腾出空间后重试，或选择“仅在本页继续”。清除站点数据、无痕会话结束或系统清理浏览器存储会删除尚未上传的本机副本；已写入私有仓库的照片不受影响。跨设备不会同步待上传队列。
 
 实现位于 `upload/`，不依赖后端。原 Worker 登录版保留供未来使用；准备清单云端勾选、账号密码登录仍属于后端功能，照片上传与旅行回忆均可由 Pages 提供。技术依据：[GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[API CORS](https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests)、[Git blobs](https://docs.github.com/en/rest/git/blobs)、[令牌安全](https://docs.github.com/en/rest/authentication/keeping-your-api-credentials-secure)。
 

@@ -11,3 +11,5 @@
 @media(max-width:700px){.bulk-caption-panel{padding:14px}.bulk-heading{gap:5px}.bulk-caption-panel .button{width:100%}.photo-select-label{padding:2px 12px}#bulk-caption{font-size:16px}}
 
 .header-links{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.header-links .back-link{white-space:nowrap}
+
+.background-panel{border-top:1px solid var(--line);padding:18px 0;margin-top:22px}.background-panel .remember-device{margin:0 0 8px}.background-panel .form-status:empty{display:none}

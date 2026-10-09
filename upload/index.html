@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#173c3d">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src https://api.github.com; form-action 'none'; base-uri 'none'; font-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' https://api.github.com; worker-src 'self'; form-action 'none'; base-uri 'none'; font-src 'self'">
   <meta name="robots" content="noindex, nofollow">
   <title>上传旅途照片 · 秋日路书</title>
   <link rel="stylesheet" href="../account-ui/auth.css">
-  <link rel="stylesheet" href="./style.css?v=20261003-memories">
-  <script src="./app.mjs?v=20260929-shared-caption" type="module"></script>
+  <link rel="stylesheet" href="./style.css?v=20261009-background">
+  <script src="./app.mjs?v=20261009-background" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -68,10 +68,11 @@
           </div>
           <ol id="photo-queue" class="photo-queue" aria-label="本次上传的照片与附言"></ol>
         </section>
+        <section class="background-panel" aria-label="续传与后台上传"><label class="remember-device" for="keep-screen-awake"><input id="keep-screen-awake" type="checkbox" checked><span>上传时保持屏幕唤醒</span></label><p id="background-status" class="input-hint" role="status"></p><p id="pending-storage-status" class="form-status" role="status"></p><button id="upload-current-page" class="text-button" type="button" hidden>仅在本页继续</button></section>
         <div id="upload-progress-wrap" class="upload-progress-wrap" hidden><div><span id="upload-progress-label">正在上传…</span><span id="upload-progress-value"></span></div><progress id="upload-progress" max="100" aria-label="照片保存步骤进度"></progress></div>
         <p id="upload-status" class="form-status" role="status" aria-live="polite"></p>
         <button id="upload-submit" class="button primary upload-submit" type="submit" disabled>保存照片 <span aria-hidden="true">↗</span></button>
-        <p class="upload-footnote">保留原图与照片自带的拍摄信息；是否含时间、位置取决于原照片。只会在确认保存后显示成功。保存期间不要刷新；结果未确认时请保留本页重试。</p>
+        <p class="upload-footnote">保留原图与照片自带的拍摄信息；是否含时间、位置取决于原照片。只会在确认保存后显示成功。点击保存后会先保存本机续传队列，再依次上传。系统可能暂停后台网页；返回此页后自动核对续传。清除浏览器网站数据会同时移除待传副本。</p>
       </fieldset>
     </form>
     <noscript><p class="form-status" data-state="error">请启用 JavaScript 后上传照片。</p></noscript>
